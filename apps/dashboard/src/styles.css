@@ -732,3 +732,14 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .transcript-markdown blockquote { margin: 12px 0; padding-left: 14px; border-left: 1px solid var(--line-strong); color: var(--muted); }
 .transcript-markdown a { color: var(--accent); text-decoration: underline; text-underline-offset: 3px; }
 .transcript-markdown strong { color: var(--text); font-weight: 600; }
+
+/* Multi-target and evidence-source additions */
+.target-filter { display: flex; flex-direction: column; gap: 4px; padding: 10px 8px; color: var(--faint); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; border-bottom: 1px solid var(--line); }
+.target-filter select { background: #101010; border: 1px solid var(--line); color: #d4d4d4; border-radius: 6px; padding: 6px 8px; font: inherit; font-size: 12px; text-transform: none; letter-spacing: 0; }
+.card-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.tag { padding: 1px 6px; border: 1px solid var(--line); border-radius: 999px; font-size: 10px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--faint); }
+.tag-incident { border-color: #7f1d1d; color: #fca5a5; }
+.tag-warning { border-color: #78350f; color: #fcd34d; }
+.tag-ignored { border-color: #1f2937; color: #9ca3af; }
+.tag-unknown { border-color: #3730a3; color: #a5b4fc; }
+.tag-healthy { border-color: #14532d; color: #86efac; }

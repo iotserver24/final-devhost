@@ -44,6 +44,49 @@ export function parseIncident(value: unknown): Incident {
   };
   for (const key of optional) if (item[key] !== undefined) incident[key] = text(item[key]);
   if (item.decision !== undefined) incident.decision = item.decision as Incident['decision'];
+  if (typeof item.targetId === 'string') incident.targetId = text(item.targetId, 80);
+  if (typeof item.classification === 'string' && ['healthy', 'ignored', 'warning', 'incident', 'unknown'].includes(item.classification)) {
+    incident.classification = item.classification as Incident['classification'];
+  }
+  if (Array.isArray(item.evidenceSources)) {
+    incident.evidenceSources = item.evidenceSources
+      .filter((source): source is string => typeof source === 'string')
+      .slice(0, 20)
+      .map(source => text(source, 40));
+  }
+  if (Array.isArray(item.affectedServices)) {
+    incident.affectedServices = item.affectedServices
+      .filter((service): service is string => typeof service === 'string')
+      .slice(0, 20)
+      .map(service => text(service, 80));
+  }
+  if (item.escalation && typeof item.escalation === 'object' && !Array.isArray(item.escalation)) {
+    const escalation = item.escalation as Record<string, unknown>;
+    incident.escalation = {
+      reason: text(escalation.reason, 600),
+      at: date(escalation.at),
+      recommendedNextStep: text(escalation.recommendedNextStep, 600),
+      ...(typeof escalation.notificationOutcome === 'string' ? { notificationOutcome: escalation.notificationOutcome as 'sent' | 'failed' | 'not_attempted' } : {}),
+    };
+  }
+  if (item.verification && typeof item.verification === 'object' && !Array.isArray(item.verification)) {
+    const verification = item.verification as Record<string, unknown>;
+    const checks = Array.isArray(verification.serviceChecks) ? verification.serviceChecks : [];
+    incident.verification = {
+      serviceChecks: checks.flatMap(check => {
+        if (!check || typeof check !== 'object') return [];
+        const value = check as Record<string, unknown>;
+        return [{ serviceId: text(value.serviceId, 80), result: (['pass', 'fail', 'unknown'].includes(String(value.result)) ? value.result : 'unknown') as 'pass' | 'fail' | 'unknown', at: date(value.at) }];
+      }),
+      journeyCheck: verification.journeyCheck && typeof verification.journeyCheck === 'object'
+        ? (() => {
+          const journey = verification.journeyCheck as Record<string, unknown>;
+          return { result: (['pass', 'fail', 'unknown'].includes(String(journey.result)) ? journey.result : 'unknown') as 'pass' | 'fail' | 'unknown', at: date(journey.at), ...(typeof journey.detail === 'string' ? { detail: text(journey.detail, 600) } : {}) };
+        })()
+        : { result: 'unknown' as const, at: date(verification.checkedAt ?? incident.detectedAt) },
+      passed: verification.passed === true,
+    };
+  }
   return incident;
 }
 

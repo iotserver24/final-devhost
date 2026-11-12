@@ -1,10 +1,66 @@
+# Sentinel: controller plus an optional monitored demo application.
+#
+# Everything is configurable from the environment; no source edits needed.
+# Copy .env.example to .env and fill in placeholders before starting.
+#
+#   docker compose up -d controller          # controller only
+#   docker compose --profile demo up -d      # plus the monitored sample app
+#
+# The controller container and the monitored application are separate
+# services with separate images and lifecycles.
+
 services:
   controller:
-    build: .
+    build:
+      context: .
+      args:
+        BUN_VERSION: ${BUN_VERSION:-1.3.11}
+        CONTROLLER_PORT: ${CONTROLLER_PORT:-8787}
+        INSTALL_GH_CLI: ${INSTALL_GH_CLI:-true}
+    image: ${CONTROLLER_IMAGE:-sentinel-controller}:${CONTROLLER_TAG:-local}
     env_file:
-      - apps/controller/.env
+      - ${CONTROLLER_ENV_FILE:-apps/controller/.env}
     environment:
       CONTROLLER_HOST: 0.0.0.0
-      CONTROLLER_PORT: 8787
+      CONTROLLER_PORT: ${CONTROLLER_PORT:-8787}
     ports:
-      - "8787:8787"
+      - "${CONTROLLER_PORT:-8787}:${CONTROLLER_PORT:-8787}"
+    restart: unless-stopped
+    read_only: false
+    # The controller needs no host Docker socket. VM rollback goes through the
+    # restricted VM agent, not the host daemon.
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - ${CONTROLLER_DATA_DIR:-./data}:/app/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:${CONTROLLER_PORT:-8787}/api/auth/session"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  # Monitored demo application. This is a separate container and image from the
+  # controller so a broken demo deployment cannot affect the controller.
+  demo-app:
+    profiles: ["demo"]
+    build:
+      context: .
+      dockerfile: ${DEMO_DOCKERFILE:-Dockerfile.demo}
+      args:
+        APP_IMAGE_TAG: ${DEMO_APP_TAG:-good}
+    image: ${DEMO_IMAGE:-sentinel-demo-app}:${DEMO_APP_TAG:-good}
+    environment:
+      PORT: ${DEMO_APP_PORT:-3000}
+      DEMO_FAULT_MODE: ${DEMO_FAULT_MODE:-healthy}
+    ports:
+      - "${DEMO_APP_PORT:-3000}:${DEMO_APP_PORT:-3000}"
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:${DEMO_APP_PORT:-3000}/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 15s

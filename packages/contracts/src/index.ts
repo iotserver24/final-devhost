@@ -32,6 +32,9 @@ export interface IncidentEvent {
 
 export type HealthState = 'healthy' | 'unhealthy' | 'unknown';
 
+/** HTTP error classification recorded on probe-derived incidents. */
+export type IncidentClassification = 'healthy' | 'ignored' | 'warning' | 'incident' | 'unknown';
+
 export type DemoServiceId = 'frontend' | 'task-api' | 'dependency';
 
 export interface ServiceStatus {
@@ -123,6 +126,12 @@ export interface Incident {
   escalation?: EscalationRecord;
   timing?: IncidentTiming;
   affectedServices?: string[];
+  /** Probe result classification; absent for non-probe incidents. */
+  classification?: IncidentClassification;
+  /** Configured target this incident belongs to (multi-target setups). */
+  targetId?: string;
+  /** Evidence sources contributing to this incident, for example `sentry`. */
+  evidenceSources?: string[];
 }
 
 export interface RemediationRequest {

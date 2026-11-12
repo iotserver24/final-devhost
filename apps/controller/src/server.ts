@@ -13,9 +13,13 @@ import { checkProject, runtimeLogSignal, type DeploymentProvider, type Deploymen
 import { createControllerActions, type RemediationConfig } from './actions';
 import { applyStoredSettings, createSettingsApi } from './settings';
 import { startLocalEngine, type LocalEngine } from './local-engine';
+import { policyFromEnvironment } from './classify';
+import { sentryFromEnvironment } from './sentry';
 import { disconnectFields, exchangeGithubManifest, githubConnectTarget, githubCredentials, githubStateOk, installationExists, listInstallationRepositories, matchingVercelProject, verifyGithubWebhook } from './github-app';
 import { pollVercelDevice, startVercelDevice } from './vercel-login';
 import { DashboardAuth } from './auth';
+import { AuditLog, RateLimiter, requiredRole, roleAllows } from './access';
+import { DeliveryLedger, RunLock, readCommentWebhook, chooseStrategy, buildFollowupContext } from './pr-followup';
 
 setDefaultResultOrder('ipv4first');
 
@@ -114,6 +118,15 @@ function readMonitorConfig(): MonitorConfig {
 const monitorConfig = monitorFlag === 'true' ? readMonitorConfig() : undefined;
 
 const dashboardAuth = new DashboardAuth(process.env.DASHBOARD_USERNAME ?? '', process.env.DASHBOARD_PASSWORD ?? '');
+const loginLimiter = new RateLimiter(Number(process.env.CONTROLLER_LOGIN_RATE_LIMIT ?? 10), 5 * 60_000);
+const actionLimiter = new RateLimiter(Number(process.env.CONTROLLER_ACTION_RATE_LIMIT ?? 30), 60_000);
+const auditLog = new AuditLog(500);
+const followupLedger = new DeliveryLedger(1_000);
+const followupLock = new RunLock(30 * 60_000);
+
+function clientKey(request: Request): string {
+  return request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || request.headers.get('x-real-ip') || 'local';
+}
 let remediation: RemediationConfig | undefined;
 if (remediationFlag === 'true') {
   const required = ['REMEDIATOR_MODEL_ID', 'REMEDIATOR_MODEL_BASE_URL', 'REMEDIATOR_MODEL_API_KEY', 'E2B_REMEDIATOR_TEMPLATE'];
@@ -200,6 +213,13 @@ function dashboardOrigin(): string {
   return url.origin;
 }
 
+const { policy: classificationPolicy, problem: classificationProblem } = policyFromEnvironment();
+if (classificationProblem) console.warn(classificationProblem);
+
+const sentry = sentryFromEnvironment();
+if (sentry.configured()) console.info('Sentry evidence source is configured (advisory only).');
+const sentryEvidence = () => sentry.evidenceLines();
+
 function launchMonitor(config: MonitorConfig): void {
   if (monitorWorker) return;
   watch.probePath = config.probePath;
@@ -212,6 +232,8 @@ function launchMonitor(config: MonitorConfig): void {
     provider: config.provider,
     store,
     actions,
+    classificationPolicy,
+    sentryEvidence,
     intervalMs: config.pollIntervalMs,
     deploymentStatusIntervalMs: config.deploymentStatusIntervalMs,
     onResult: (_, result) => {
@@ -326,6 +348,8 @@ function launchMonitor(config: MonitorConfig): void {
         provider: logProvider,
         store,
         actions,
+        classificationPolicy,
+        sentryEvidence,
         logSignal: signal,
       });
       if (result.action === 'monitor' && result.consecutiveFailures > watch.failures) {
@@ -447,7 +471,48 @@ async function integrationRoutes(request: Request, settingsStore: typeof store):
     if (!verifyGithubWebhook(body, request.headers.get('x-hub-signature-256'), secret)) {
       return Response.json({ error: 'GitHub webhook signature did not match.' }, { status: 401 });
     }
-    return new Response(null, { status: 204 });
+    if (request.headers.get('x-github-event') !== 'issue_comment') return new Response(null, { status: 204 });
+
+    const deliveryId = request.headers.get('x-github-delivery') ?? '';
+    if (!followupLedger.claim(deliveryId)) {
+      auditLog.record({ actor: 'system', action: 'pr.followup', target: deliveryId || 'unknown', outcome: 'denied', detail: 'duplicate delivery ignored' });
+      return Response.json({ ok: true, ignored: 'duplicate delivery' }, { status: 202 });
+    }
+    let parsed: unknown;
+    try { parsed = JSON.parse(body); } catch { return Response.json({ error: 'Invalid webhook payload.' }, { status: 400 }); }
+    const outcome = readCommentWebhook(parsed, {
+      allowedRepository: process.env.REMEDIATOR_ALLOWED_REPOSITORY || process.env.REMEDIATOR_REPOSITORY || '',
+      allowedInstallationId: process.env.GITHUB_INSTALLATION_ID,
+      allowedAuthors: (process.env.GITHUB_COMMAND_ALLOWLIST ?? '').split(',').map(item => item.trim()).filter(Boolean),
+      mention: process.env.GITHUB_COMMAND_MENTION || '@sentinel',
+    });
+    if (outcome.kind === 'ignored') {
+      auditLog.record({ actor: 'system', action: 'pr.followup', target: deliveryId || 'unknown', outcome: 'denied', detail: outcome.reason });
+      return Response.json({ ok: true, ignored: outcome.reason }, { status: 202 });
+    }
+
+    const key = `${outcome.event.repository}#${outcome.event.pullRequestNumber}`;
+    if (!followupLock.tryAcquire(key)) {
+      auditLog.record({ actor: 'system', action: 'pr.followup', target: key, outcome: 'denied', detail: 'a run is already active for this pull request' });
+      return Response.json({ ok: false, ignored: 'a run is already active for this pull request' }, { status: 202 });
+    }
+    const strategy = chooseStrategy({
+      sandboxResumeSupported: process.env.E2B_RESUME_SUPPORTED === 'true',
+      ...(process.env.E2B_LAST_SANDBOX_ID ? { previousSandboxId: process.env.E2B_LAST_SANDBOX_ID } : {}),
+      ...(process.env.E2B_LAST_SANDBOX_EXPIRES ? { previousExpiresAt: process.env.E2B_LAST_SANDBOX_EXPIRES } : {}),
+    });
+    const followup = buildFollowupContext(outcome.event, outcome.instruction);
+    auditLog.record({ actor: 'system', action: 'pr.followup', target: key, outcome: 'allowed', detail: `accepted: ${strategy.strategy} sandbox` });
+    // Sandbox execution requires E2B credentials and a configured repository.
+    // Without them the comment is accepted and recorded, never silently dropped.
+    const executable = Boolean(remediation);
+    followupLock.release(key);
+    return Response.json({
+      ok: true,
+      accepted: { repository: followup.repository, pullRequest: followup.pullRequestNumber, strategy: strategy.strategy, reason: strategy.reason },
+      executed: executable,
+      ...(executable ? {} : { note: 'Remediation is not configured on this controller, so the follow-up was recorded but no sandbox was started.' }),
+    }, { status: 202 });
   }
   if (url.pathname === '/api/github/connect' && request.method === 'GET') {
     await applyStoredSettings(settingsStore);
@@ -581,10 +646,32 @@ const server = Bun.serve({
   port,
   fetch: async (request, bunServer) => {
     const url = new URL(request.url);
+    // Login attempts are rate limited per client before any credential check.
+    if (url.pathname === '/api/auth/login' && request.method === 'POST') {
+      const limited = loginLimiter.check(clientKey(request));
+      if (!limited.allowed) {
+        auditLog.record({ actor: 'anonymous', action: 'auth.login', target: clientKey(request), outcome: 'denied', detail: 'rate limited' });
+        return Response.json({ error: 'Too many attempts. Try again shortly.' }, { status: 429, headers: { 'Retry-After': String(Math.ceil(limited.retryAfterMs / 1000)) } });
+      }
+    }
     const authResponse = await dashboardAuth.handle(request);
     if (authResponse) return authResponse;
-    if (url.pathname.startsWith('/api/') && !dashboardAuth.isPublic(url.pathname) && !dashboardAuth.isAuthorized(request)) {
-      return dashboardAuth.unauthorized();
+    if (url.pathname.startsWith('/api/') && !dashboardAuth.isPublic(url.pathname)) {
+      const role = dashboardAuth.roleOf(request);
+      const required = requiredRole(request.method, url.pathname);
+      if (!role) return dashboardAuth.unauthorized();
+      if (!roleAllows(role, required)) {
+        auditLog.record({ actor: role, action: `${request.method} ${url.pathname}`, target: url.pathname, outcome: 'denied', detail: `requires ${required}` });
+        return dashboardAuth.forbidden();
+      }
+      if (required === 'operator' || required === 'admin') {
+        const limited = actionLimiter.check(`${role}:${clientKey(request)}`);
+        if (!limited.allowed) {
+          auditLog.record({ actor: role, action: `${request.method} ${url.pathname}`, target: url.pathname, outcome: 'denied', detail: 'rate limited' });
+          return Response.json({ error: 'Too many sensitive operations. Try again shortly.' }, { status: 429, headers: { 'Retry-After': String(Math.ceil(limited.retryAfterMs / 1000)) } });
+        }
+        auditLog.record({ actor: role, action: `${request.method} ${url.pathname}`, target: url.pathname, outcome: 'allowed' });
+      }
     }
     const connect = await integrationRoutes(request, store);
     if (connect) return connect;
@@ -626,6 +713,13 @@ const server = Bun.serve({
     }
     if (url.pathname === '/api/broker/audit' && request.method === 'GET') {
       return Response.json({ audit: localEngine ? localEngine.broker.auditTrail() : [] });
+    }
+    if (url.pathname === '/api/evidence/sentry' && request.method === 'GET') {
+      const evidence = await sentry.recentIssues();
+      return Response.json({ configured: evidence.configured, ok: evidence.ok, detail: evidence.detail, issues: evidence.issues });
+    }
+    if (url.pathname === '/api/audit' && request.method === 'GET') {
+      return Response.json({ entries: auditLog.list(200), roles: dashboardAuth.configuredRoles() });
     }
     return (await activityApi(request, bunServer)) ?? incidentApi(request);
   },
