@@ -1,9 +1,10 @@
 import type { Metadata } from "next";
+import { Shell } from "@/components/Shell";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "TaskFlow | Nexathon Sample",
-  description: "A small, intentionally breakable sample app for Nexathon incident remediation."
+  title: "Fieldnote",
+  description: "A workspace for projects, owners, and the tasks still open."
 };
 
 export default function RootLayout({
@@ -11,7 +12,9 @@ export default function RootLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        <Shell>{children}</Shell>
+      </body>
     </html>
   );
 }

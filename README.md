@@ -39,7 +39,7 @@ and operator-assistance tool, not a general-purpose monitoring service:
 | --- | --- |
 | `apps/controller` | Bun HTTP API, dashboard authentication and roles, polling worker, provider adapters (Vercel, Railway, Render, Coolify, VM agent), HTTP error classification, incident decisions, actions, PostgreSQL persistence, settings, Sentry evidence, PR comment follow-up, and agent activity streaming. |
 | `apps/dashboard` | Next.js and React incident UI, login/setup screens, API client, target filtering, and live remediation activity. It reads incidents through the controller; it does not initiate agent runs from the browser. |
-| `apps/sample` | Standalone Next.js app (`TaskFlow`) used as the monitored target and to rehearse healthy, runtime-regression, and persistent-failure scenarios. |
+| `apps/sample` | Standalone Next.js app (Fieldnote) used as the monitored target: projects, task board, status filter, and healthy, runtime-regression, and persistent-failure scenarios. |
 | `packages/contracts` | Shared incident/event types, service status, classification, evidence/action/verification/escalation records, and the controller/remediator data boundary. |
 | `packages/remediator` | E2B-based fix workflow: clone a configured repository revision, reproduce the failure, produce and validate a patch, enforce the dependency policy, then optionally publish a draft PR from the controller environment. |
 | `packages/notifier` | Redacted incident report formatting and Slack/SMTP delivery. Notification failures are recorded separately from recovery actions. |

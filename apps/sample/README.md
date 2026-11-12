@@ -33,8 +33,12 @@ Open <http://localhost:3000>. The demo data is local to this app.
 ## API endpoints
 
 - `GET /api/health` — service health probe
-- `GET /api/tasks` — task list and the main controller probe
+- `GET /api/tasks` — task list and the main controller probe. `?status=` filters by Todo, In progress, or Done
 - `GET /api/tasks/summary` — task counts by status
+- `GET /api/tasks/crash` — deliberate throw used by the regression fixture
+- `GET /api/projects` — projects with task counts
+
+Pages: `/` board, `/projects`, `/projects/[id]`, `/tasks/[id]`.
 
 For example:
 

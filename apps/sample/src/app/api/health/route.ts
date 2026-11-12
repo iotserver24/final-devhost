@@ -6,6 +6,7 @@ export const dynamic = "force-dynamic";
 export function GET() {
   const mode = getFaultMode();
 
+  // Runtime mode intentionally simulates a fresh production regression.
   if (mode === "runtime") {
     return NextResponse.json(
       { ok: false, service: "task-manager", error: "Demo runtime regression" },

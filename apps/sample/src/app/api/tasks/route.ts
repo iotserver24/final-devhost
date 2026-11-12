@@ -3,7 +3,7 @@ import { getFaultMode, tasks } from "@/lib/tasks";
 
 export const dynamic = "force-dynamic";
 
-export function GET() {
+export function GET(request: Request) {
   const mode = getFaultMode();
 
   if (mode === "runtime" || mode === "persistent") {
@@ -19,10 +19,14 @@ export function GET() {
     );
   }
 
+  const status = new URL(request.url).searchParams.get("status");
+  const selected = status
+    ? tasks.filter((task) => task.status.toLowerCase() === status.toLowerCase())
+    : tasks;
   return NextResponse.json({
     ok: true,
-    count: tasks.length,
-    tasks,
+    count: selected.length,
+    tasks: selected,
     timestamp: new Date().toISOString()
   });
 }

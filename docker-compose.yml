@@ -19,6 +19,7 @@ services:
     environment:
       CONTROLLER_HOST: 0.0.0.0
       CONTROLLER_PORT: ${CONTROLLER_PORT:-8787}
+      DATABASE_URL: ${POSTGRES_URL:-postgres://sentinel:sentinel@postgres:5432/sentinel}
     ports:
       - "${CONTROLLER_PORT:-8787}:${CONTROLLER_PORT:-8787}"
     depends_on:
@@ -45,7 +46,7 @@ services:
     image: postgres:13
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-sentinel}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sentinel}
       POSTGRES_DB: ${POSTGRES_DB:-sentinel}
     volumes:
       - postgres_data:/var/lib/postgresql/data
