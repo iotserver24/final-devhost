@@ -1,13 +1,9 @@
-# Sentinel: controller plus an optional monitored demo application.
+# Sentinel: controller, PostgreSQL, and an optional monitored demo app.
 #
-# Everything is configurable from the environment; no source edits needed.
-# Copy .env.example to .env and fill in placeholders before starting.
+# Copy apps/controller/.env.example to apps/controller/.env and configure it.
 #
-#   docker compose up -d controller          # controller only
-#   docker compose --profile demo up -d      # plus the monitored sample app
-#
-# The controller container and the monitored application are separate
-# services with separate images and lifecycles.
+#   docker compose up -d controller
+#   docker compose --profile demo up -d
 
 services:
   controller:
@@ -25,23 +21,45 @@ services:
       CONTROLLER_PORT: ${CONTROLLER_PORT:-8787}
     ports:
       - "${CONTROLLER_PORT:-8787}:${CONTROLLER_PORT:-8787}"
+    depends_on:
+      postgres:
+        condition: service_healthy
     restart: unless-stopped
     read_only: false
-    # The controller needs no host Docker socket. VM rollback goes through the
-    # restricted VM agent, not the host daemon.
     security_opt:
       - no-new-privileges:true
     volumes:
       - ${CONTROLLER_DATA_DIR:-./data}:/app/data
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:${CONTROLLER_PORT:-8787}/api/auth/session"]
+      test:
+        - CMD
+        - curl
+        - -fsS
+        - http://127.0.0.1:${CONTROLLER_PORT:-8787}/api/auth/session
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 20s
 
-  # Monitored demo application. This is a separate container and image from the
-  # controller so a broken demo deployment cannot affect the controller.
+  postgres:
+    image: postgres:13
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-sentinel}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-sentinel}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  # Separate image and lifecycle from the controller.
   demo-app:
     profiles: ["demo"]
     build:
@@ -59,8 +77,15 @@ services:
     security_opt:
       - no-new-privileges:true
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:${DEMO_APP_PORT:-3000}/api/health"]
+      test:
+        - CMD
+        - curl
+        - -fsS
+        - http://127.0.0.1:${DEMO_APP_PORT:-3000}/api/health
       interval: 15s
       timeout: 5s
       retries: 3
       start_period: 15s
+
+volumes:
+  postgres_data:
