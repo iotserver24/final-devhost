@@ -12,6 +12,7 @@ import { CoolifyProvider, RailwayProvider, RenderProvider } from './platform-pro
 import { checkProject, runtimeLogSignal, type DeploymentProvider, type DeploymentSummary, type RuntimeLog } from './monitor';
 import { createControllerActions, type RemediationConfig } from './actions';
 import { applyStoredSettings, createSettingsApi } from './settings';
+import { startLocalEngine, type LocalEngine } from './local-engine';
 import { disconnectFields, exchangeGithubManifest, githubConnectTarget, githubCredentials, githubStateOk, installationExists, listInstallationRepositories, matchingVercelProject, verifyGithubWebhook } from './github-app';
 import { pollVercelDevice, startVercelDevice } from './vercel-login';
 import { DashboardAuth } from './auth';
@@ -402,6 +403,38 @@ async function stopMonitor(): Promise<void> {
   deploymentWatchTimer = undefined;
   await monitorWorker?.stop();
   monitorWorker = undefined;
+  await localEngine?.stop();
+  localEngine = undefined;
+}
+
+// --- Local demo monitor (BE2): watches BE1's TaskFlow services and acts through the broker. ---
+let localEngine: LocalEngine | undefined;
+
+function localDemoBaseUrl(): string | undefined {
+  const base = process.env.CONTROLLER_DEMO_BASE_URL?.trim().replace(/\/$/, '');
+  if (!base) return undefined;
+  const url = new URL(base);
+  const local = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
+  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) {
+    throw new Error('CONTROLLER_DEMO_BASE_URL must be a credential-free http(s) origin.');
+  }
+  if (url.protocol === 'http:' && !local) {
+    throw new Error('CONTROLLER_DEMO_BASE_URL must be localhost over http; demo controls stay local-only.');
+  }
+  return base;
+}
+
+function startLocalDemoMonitor(): void {
+  if (localEngine) return;
+  const base = localDemoBaseUrl();
+  if (!base) return;
+  localEngine = startLocalEngine({
+    demoBaseUrl: base,
+    store,
+    pollIntervalMs: Number(process.env.CONTROLLER_DEMO_POLL_INTERVAL_MS ?? 5_000),
+    detectionThreshold: Number(process.env.CONTROLLER_DEMO_DETECTION_THRESHOLD ?? 1),
+  });
+  console.info(`Local demo monitor started against ${base}.`);
 }
 
 async function integrationRoutes(request: Request, settingsStore: typeof store): Promise<Response | null> {
@@ -561,6 +594,39 @@ const server = Bun.serve({
       if (request.method !== 'GET') return Response.json({ error: 'Method not allowed.' }, { status: 405 });
       return Response.json({ ...watch, now: new Date().toISOString() });
     }
+    // --- BE2 local demo endpoints ---
+    if (url.pathname === '/api/services' && request.method === 'GET') {
+      if (!localEngine) return Response.json({ error: 'Local demo monitor is not running. Set CONTROLLER_DEMO_BASE_URL and restart.' }, { status: 409 });
+      try {
+        return Response.json({ services: await localEngine.adapter.serviceStatuses() });
+      } catch (error) {
+        return Response.json({ error: error instanceof Error ? error.message : 'Service status is unavailable.' }, { status: 502 });
+      }
+    }
+    if (url.pathname === '/api/actions/dry-run' && request.method === 'POST') {
+      if (!localEngine) return Response.json({ error: 'Local demo monitor is not running. Set CONTROLLER_DEMO_BASE_URL and restart.' }, { status: 409 });
+      let body: unknown;
+      try { body = await request.json(); } catch { return Response.json({ error: 'Expected JSON.' }, { status: 400 }); }
+      const record = body && typeof body === 'object' && 'request' in body ? (body as { request?: unknown }).request : body;
+      if (!record || typeof record !== 'object') return Response.json({ error: 'Expected a broker request.' }, { status: 400 });
+      const candidate = record as Record<string, unknown>;
+      const request_ = {
+        kind: String(candidate.kind ?? ''),
+        target: String(candidate.target ?? ''),
+        ...(candidate.revision !== undefined ? { revision: String(candidate.revision) } : {}),
+        ...(candidate.configKey !== undefined ? { configKey: String(candidate.configKey) } : {}),
+        ...(candidate.configValue !== undefined ? { configValue: String(candidate.configValue) } : {}),
+      } as Parameters<typeof localEngine.broker.dryRun>[0];
+      try {
+        const decision = await localEngine.broker.dryRun(request_, 'dry-run-probe');
+        return Response.json({ decision, proposed: request_ });
+      } catch (error) {
+        return Response.json({ error: error instanceof Error ? error.message : 'Dry run failed.' }, { status: 502 });
+      }
+    }
+    if (url.pathname === '/api/broker/audit' && request.method === 'GET') {
+      return Response.json({ audit: localEngine ? localEngine.broker.auditTrail() : [] });
+    }
     return (await activityApi(request, bunServer)) ?? incidentApi(request);
   },
 });
@@ -570,6 +636,7 @@ if (!process.env.NEXATHON_RUN_TOKEN) {
 }
 
 if (monitorConfig) launchMonitor(monitorConfig);
+startLocalDemoMonitor();
 
 let shuttingDown = false;
 async function shutdown() {
