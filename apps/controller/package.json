@@ -1,0 +1,22 @@
+{
+  "name": "@nexathon/controller",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "bun src/server.ts",
+    "start:run": "bun src/start-run.ts",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@nexathon/contracts": "workspace:*",
+    "@nexathon/notifier": "workspace:*",
+    "@nexathon/remediator": "workspace:*",
+    "postgres": "^3.4.7"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.14",
+    "typescript": "^5.9.3"
+  }
+}

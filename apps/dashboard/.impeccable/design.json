@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "surface": "dashboard",
+  "mode": "operate",
+  "theme": "dark",
+  "tokens": {
+    "background": "#0b1017",
+    "surface": "#111923",
+    "text": "#e7edf5",
+    "muted": "#8c9bad",
+    "teal": "#55d6c0",
+    "amber": "#f1bb69",
+    "red": "#f27d82"
+  }
+}

@@ -1,0 +1,10 @@
+services:
+  controller:
+    build: .
+    env_file:
+      - apps/controller/.env
+    environment:
+      CONTROLLER_HOST: 0.0.0.0
+      CONTROLLER_PORT: 8787
+    ports:
+      - "8787:8787"

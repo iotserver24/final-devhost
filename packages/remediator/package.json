@@ -1,0 +1,27 @@
+{
+  "name": "@nexathon/remediator",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "bun test",
+    "smoke:e2b": "bun run src/smoke.ts",
+    "smoke:fixture": "bun run src/fixture-smoke.ts",
+    "demo:fix": "bun run src/demo-fix.ts",
+    "template:build": "e2b template create nexathon-remediator --path e2b-template --dockerfile Dockerfile --cpu-count 8 --memory-mb 8192"
+  },
+  "dependencies": {
+    "e2b": "^2.59.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.9.0"
+  },
+  "engines": {
+    "bun": ">=1.3.0"
+  },
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}

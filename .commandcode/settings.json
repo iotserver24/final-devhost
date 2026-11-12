@@ -1,0 +1,25 @@
+{
+  "permissions": {
+    "allow": [
+      "Shell(cd /home/madvith/Projects/nex/nexathon && echo \"=== controller typecheck ===\" && bun run --filter @nexathon/controller typecheck 2>&1; echo \"=== controller test ===\" && bun run --filter @nexathon/controller test 2>&1; echo \"=== notifier ===\" && bun run --filter @nexathon/notifier test 2>&1 && bun run --filter @nexathon/notifier typecheck 2>&1; echo \"=== remediator ===\" && bun run --filter @nexathon/remediator test 2>&1 && bun run --filter @nexathon/remediator typecheck 2>&1)",
+      "Shell(bun:*)",
+      "Shell(SCR=$COMMANDCODE_SCRATCHPAD; cp apps/dashboard/src/styles.css $SCR/styles.agent.css # verify every untracked file on disk matches the stash's copy for f in $(git ls-tree -r stash@{0}^3 --name-only); do if git show \"stash@{0}^3:$f\" 2>/dev/null | diff -q - \"$f\" >/dev/null 2>&1; then :; else echo \"DIFFERS: $f\"; fi done; echo done)",
+      "Shell(git checkout -- apps/dashboard/src/styles.css git checkout stash@{0} -- \\ README.md \\ apps/controller/activity-api.ts 2>/dev/null; true # do the real list (controller path) git checkout stash@{0} -- \\ apps/controller/src/activity-api.ts \\ apps/controller/src/api.ts \\ apps/controller/src/github-app.ts \\ apps/controller/src/incident-store.ts \\ apps/controller/package.json \\ apps/controller/tests/api.test.ts \\ apps/controller/tests/monitor-safety.test.ts \\ apps/controller/tests/settings.test.ts \\ apps/dashboard/.env.example \\ apps/dashboard/README.md \\ apps/dashboard/package.json \\ apps/dashboard/src/App.tsx \\ apps/dashboard/tsconfig.json \\ docs/demo.md \\ package.json rm apps/dashboard/index.html apps/dashboard/src/main.tsx apps/dashboard/vite.config.ts git status --short | grep -Ev '^\\?\\?')",
+      "Shell(SCR=$COMMANDCODE_SCRATCHPAD; mkdir -p $SCR/merge git checkout stash@{0} -- README.md for f in apps/controller/.env.example apps/controller/README.md apps/controller/src/monitor.ts apps/controller/src/server.ts apps/controller/src/settings.ts apps/dashboard/src/Setup.tsx; do base=$SCR/merge/base_${f//\\//_}; ours=$SCR/merge/ours_${f//\\//_} git show 4f38a20:\"$f\" > \"$base\" cp \"$f\" \"$ours\" git show \"stash@{0}:$f\" > \"$SCR/merge/theirs\" cp \"$ours\" \"$f\" git merge-file \"$f\" \"$base\" \"$SCR/merge/theirs\" code=$? echo \"$f -> merge-file exit $code\" done grep -c '<<<<<<<' apps/controller/.env.example apps/controller/README.md apps/controller/src/monitor.ts apps/controller/src/server.ts apps/controller/src/settings.ts apps/dashboard/src/Setup.tsx)",
+      "Shell(for:*)",
+      "Shell(do:*)",
+      "Shell(grep:*)",
+      "Shell(done:*)",
+      "Shell(SCR=$COMMANDCODE_SCRATCHPAD; git show 'stash@{0}:apps/dashboard/src/Setup.tsx' > $SCR/merge/theirs grep -n 'Railway\\|Render\\|Coolify\\|setup-note\\|error-box' $SCR/merge/theirs | head; echo '---'; awk '/^=======$/,/^>>>>>>>/' apps/dashboard/src/Setup.tsx | sed -n '25,60p')",
+      "Shell(SCR=$COMMANDCODE_SCRATCHPAD;:*)",
+      "Shell(SCR=$COMMANDCODE_SCRATCHPAD git show 'stash@{0}:.commandcode/taste/taste.md' > $SCR/stash_taste.md 2>/dev/null diff $SCR/stash_taste.md .commandcode/taste/taste.md || true echo '=== styles: stash vs head' diff <(git show 'stash@{0}:apps/dashboard/src/styles.css') apps/dashboard/src/styles.css | head -30)",
+      "Shell(git show 'stash@{0}:apps/dashboard/src/styles.css' > apps/dashboard/src/styles.css && grep -n \"\\.trigger { font\\|\\.trigger {\" apps/dashboard/src/styles.css | head -3)",
+      "Shell(bunx tsc --noEmit 2 >& 1)",
+      "Shell(sed:*)",
+      "Shell(bunx tsc --noEmit)",
+      "Shell(git:*)"
+    ],
+    "deny": [],
+    "defaultMode": "default"
+  }
+}

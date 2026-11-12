@@ -1,0 +1,12 @@
+{
+  "name": "nexathon",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "packageManager": "bun@1.3.11",
+  "workspaces": ["apps/*", "packages/*"],
+  "scripts": {
+    "demo:rehearsal": "NEXT_PUBLIC_DATA_MODE=fixtures bun run --cwd apps/dashboard dev",
+    "demo:live": "bash scripts/demo-live.sh"
+  }
+}
