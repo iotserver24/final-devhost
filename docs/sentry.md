@@ -9,7 +9,8 @@ on their own, enough to trigger an automated action.
 SENTRY_ORG=your-org
 SENTRY_PROJECT=your-project
 SENTRY_AUTH_TOKEN=<token>
-# SENTRY_BASE_URL=https://sentry.io   # change for self-hosted
+# SENTRY_BASE_URL=https://us.sentry.io   # required for the US cloud region; sentry.io redirects are rejected
+# SENTRY_ENVIRONMENT=production          # optional; limits evidence to that environment
 ```
 
 All three of org, project, and token are required; with any missing, Sentry is
@@ -61,7 +62,19 @@ in a try/catch and proceeds.
 mapping, header-only auth, bounded titles, rate limits, downtime, unexpected
 payloads, and incomplete configuration.
 
-## Live setup still required
+String event counts from the Sentry API are accepted. A single issue still
+does not start a rollback.
 
-A real Sentry organization, project, and token. Nothing in this repository has
-been exercised against a live Sentry account.
+## Live account
+
+The connected account is organization `supercharge-ai` (region `https://us.sentry.io`).
+A dedicated team and project named `sentinel` were created for this system, separate
+from the existing `rust` project. Creating a brand-new Sentry organization is not
+available through the connected tools.
+
+Live issue search against `rust` returned unresolved issues (for example `RUST-7`).
+The `sentinel` project has no events yet. The controller still needs
+`SENTRY_AUTH_TOKEN` in the environment before `/api/evidence/sentry` can call the API.
+That token is not stored in this repository.
+
+See also `docs/posthog.md` for the matching PostHog project.

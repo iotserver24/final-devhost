@@ -27,6 +27,8 @@ export interface SentryClientOptions {
   project?: string;
   token?: string;
   baseUrl?: string;
+  /** When set, only issues from this Sentry environment are requested. */
+  environment?: string;
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
   lookbackMinutes?: number;
@@ -34,6 +36,12 @@ export interface SentryClientOptions {
 }
 
 const ISSUE_TITLES = 120;
+
+function countOf(value: unknown): number {
+  if (typeof value === 'number' && Number.isFinite(value)) return Math.max(0, Math.floor(value));
+  if (typeof value === 'string' && /^\d+$/.test(value)) return Number(value);
+  return 0;
+}
 
 function compare(value: unknown): simplyIssue | undefined {
   return value && typeof value === 'object' ? value as simplyIssue : undefined;
@@ -65,7 +73,8 @@ export class SentryClient {
     }
     const limit = Math.max(1, Math.min(this.options.limit ?? 5, 25));
     const period = Math.max(5, Math.min(this.options.lookbackMinutes ?? 60, 1_440));
-    const url = `${this.baseUrl}/api/0/projects/${encodeURIComponent(this.options.org!)}/${encodeURIComponent(this.options.project!)}/issues/?query=${encodeURIComponent('is:unresolved')}&statsPeriod=${period}m&limit=${limit}`;
+    const query = this.options.environment ? `is:unresolved environment:${this.options.environment}` : 'is:unresolved';
+    const url = `${this.baseUrl}/api/0/projects/${encodeURIComponent(this.options.org!)}/${encodeURIComponent(this.options.project!)}/issues/?query=${encodeURIComponent(query)}&statsPeriod=${period}m&limit=${limit}`;
     try {
       const response = await this.fetchImpl(url, {
         headers: { Authorization: `Bearer ${this.options.token}`, Accept: 'application/json' },
@@ -90,7 +99,7 @@ export class SentryClient {
     if (!id) return [];
     const title = typeof item.title === 'string' ? item.title.slice(0, ISSUE_TITLES) : 'Untitled Sentry issue';
     const level = typeof item.level === 'string' ? item.level : 'error';
-    const count = typeof item.count === 'number' && Number.isFinite(item.count) ? item.count : 0;
+    const count = countOf(item.count);
     const lastSeen = typeof item.lastSeen === 'string' ? item.lastSeen : undefined;
     const shortId = typeof item.shortId === 'string' ? item.shortId : undefined;
     return [{ id, title, level, count, ...(lastSeen ? { lastSeen } : {}), ...(shortId ? { shortId } : {}) }];
@@ -110,5 +119,6 @@ export function sentryFromEnvironment(env: Record<string, string | undefined> = 
     project: env.SENTRY_PROJECT?.trim() || undefined,
     token: env.SENTRY_AUTH_TOKEN?.trim() || undefined,
     ...(env.SENTRY_BASE_URL?.trim() ? { baseUrl: env.SENTRY_BASE_URL.trim() } : {}),
+    ...(env.SENTRY_ENVIRONMENT?.trim() ? { environment: env.SENTRY_ENVIRONMENT.trim() } : {}),
   });
 }

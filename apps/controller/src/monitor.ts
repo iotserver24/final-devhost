@@ -101,6 +101,8 @@ export interface MonitorOptions {
   classificationPolicy?: ClassificationPolicyConfig;
   /** Optional advisory evidence from an external source such as Sentry. */
   sentryEvidence?: () => Promise<string[]>;
+  /** Optional advisory evidence from PostHog error tracking. */
+  posthogEvidence?: () => Promise<string[]>;
   /** Same error repeated within one fetched batch, independent of the HTTP streak. */
   logSignal?: { evidence: string; occurrences: number; logs: RuntimeLog[]; deploymentId: string };
 }
@@ -541,6 +543,18 @@ export async function checkProject(options: MonitorOptions): Promise<MonitorResu
         incident.evidence.push(...lines.map(line => evidence(line)));
         incident.evidenceSources = [...new Set([...(incident.evidenceSources ?? []), 'sentry'])];
         incident.events.push(event(now().toISOString(), 'evidence', `${lines.length} Sentry evidence line(s) attached as advisory context.`));
+      }
+    } catch {
+      // An evidence source outage must never block incident handling.
+    }
+  }
+  if (options.posthogEvidence) {
+    try {
+      const lines = await options.posthogEvidence();
+      if (lines.length) {
+        incident.evidence.push(...lines.map(line => evidence(line)));
+        incident.evidenceSources = [...new Set([...(incident.evidenceSources ?? []), 'posthog'])];
+        incident.events.push(event(now().toISOString(), 'evidence', `${lines.length} PostHog evidence line(s) attached as advisory context.`));
       }
     } catch {
       // An evidence source outage must never block incident handling.

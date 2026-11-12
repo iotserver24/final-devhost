@@ -65,6 +65,13 @@ describe('Sentry integration', () => {
     expect(evidence.issues).toEqual([]);
   });
 
+  test('parses string counts from the live Sentry API and filters by environment', async () => {
+    const { fetchImpl, calls } = transport(() => Response.json([{ id: '9', shortId: 'SENTINEL-1', title: 'boom', level: 'error', count: '4' }]));
+    const evidence = await new SentryClient({ ...options, environment: 'production', fetchImpl }).recentIssues();
+    expect(evidence.issues[0]!.count).toBe(4);
+    expect(calls[0]!.url).toContain('environment%3Aproduction');
+  });
+
   test('counts and titles are bounded', async () => {
     const longTitle = 'x'.repeat(500);
     const { fetchImpl } = transport(() => Response.json([{ id: '1', title: longTitle, level: 'error', count: 9 }]));

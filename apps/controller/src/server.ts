@@ -14,6 +14,7 @@ import { createControllerActions, type RemediationConfig } from './actions';
 import { applyStoredSettings, createSettingsApi } from './settings';
 import { startLocalEngine, type LocalEngine } from './local-engine';
 import { policyFromEnvironment } from './classify';
+import { posthogFromEnvironment } from './posthog';
 import { sentryFromEnvironment } from './sentry';
 import { disconnectFields, exchangeGithubManifest, githubConnectTarget, githubCredentials, githubStateOk, installationExists, listInstallationRepositories, matchingVercelProject, verifyGithubWebhook } from './github-app';
 import { pollVercelDevice, startVercelDevice } from './vercel-login';
@@ -219,6 +220,9 @@ if (classificationProblem) console.warn(classificationProblem);
 const sentry = sentryFromEnvironment();
 if (sentry.configured()) console.info('Sentry evidence source is configured (advisory only).');
 const sentryEvidence = () => sentry.evidenceLines();
+const posthog = posthogFromEnvironment();
+if (posthog.configured()) console.info('PostHog evidence source is configured (advisory only).');
+const posthogEvidence = () => posthog.evidenceLines();
 
 function launchMonitor(config: MonitorConfig): void {
   if (monitorWorker) return;
@@ -234,6 +238,7 @@ function launchMonitor(config: MonitorConfig): void {
     actions,
     classificationPolicy,
     sentryEvidence,
+    posthogEvidence,
     intervalMs: config.pollIntervalMs,
     deploymentStatusIntervalMs: config.deploymentStatusIntervalMs,
     onResult: (_, result) => {
@@ -350,6 +355,7 @@ function launchMonitor(config: MonitorConfig): void {
         actions,
         classificationPolicy,
         sentryEvidence,
+    posthogEvidence,
         logSignal: signal,
       });
       if (result.action === 'monitor' && result.consecutiveFailures > watch.failures) {
@@ -716,6 +722,10 @@ const server = Bun.serve({
     }
     if (url.pathname === '/api/evidence/sentry' && request.method === 'GET') {
       const evidence = await sentry.recentIssues();
+      return Response.json({ configured: evidence.configured, ok: evidence.ok, detail: evidence.detail, issues: evidence.issues });
+    }
+    if (url.pathname === '/api/evidence/posthog' && request.method === 'GET') {
+      const evidence = await posthog.recentIssues();
       return Response.json({ configured: evidence.configured, ok: evidence.ok, detail: evidence.detail, issues: evidence.issues });
     }
     if (url.pathname === '/api/audit' && request.method === 'GET') {
