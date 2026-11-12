@@ -1,10 +1,10 @@
-FROM oven/bun:1.3.11
+FROM node:22-slim
 WORKDIR /app
-COPY package.json bun.lock ./
 COPY apps/sample/package.json apps/sample/package.json
-RUN bun install --frozen-lockfile --production
+COPY package.json ./
+RUN npm install --no-save --no-audit --no-fund
 COPY apps/sample apps/sample
 WORKDIR /app/apps/sample
-RUN bun run build
+RUN npm run build
 EXPOSE 3000
-CMD ["bun", "run", "start"]
+CMD ["npm", "run", "start"]
