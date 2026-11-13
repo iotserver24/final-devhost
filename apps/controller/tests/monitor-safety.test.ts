@@ -132,6 +132,49 @@ describe('monitor safety boundaries', () => {
     expect(result.action).toBe('unavailable');
   });
 
+  it('records public probe failures even when deployment access is forbidden, without taking recovery actions', async () => {
+    let remediations = 0;
+    let health: ProbeResponse = { result: 'fail', statusCode: 500, evidence: 'HTTP 500 from public host' };
+    const { implementation, calls } = provider({
+      getProductionDeployment: async () => { throw new Error('Vercel HTTP 403'); },
+      probeProduction: async () => health,
+    });
+    let clock = at;
+    const options = makeOptions(implementation, {
+      serviceId: 'hopper', now: () => clock,
+      actions: { remediate: async () => { remediations++; return { ok: true, message: 'Unexpected' }; } },
+    });
+    const result = await driveFailure(options);
+    expect(result.action).toBe('incident');
+    if (result.action !== 'incident') throw new Error('Expected a health incident');
+    expect(result.incident.targetId).toBe('hopper');
+    expect(result.incident.deploymentId).toBeUndefined();
+    expect(result.incident.decision).toBe('escalate');
+    expect(result.incident.status).toBe('needs_human');
+    expect((await checkProject(options)).action).toBe('incident');
+    expect((await options.store.get(result.incident.id))?.id).toBe(result.incident.id);
+    expect(remediations).toBe(0);
+    expect(calls.rollback).toBe(0);
+    health = { result: 'pass', statusCode: 200, evidence: 'HTTP 200' };
+    const passed = await checkProject(options);
+    expect(passed.probe?.result).toBe('pass');
+    clock = new Date(at.getTime() + 60_000);
+    health = { result: 'fail', statusCode: 500, evidence: 'HTTP 500 again' };
+    const next = await driveFailure(options);
+    expect(next.action).toBe('incident');
+    if (next.action === 'incident') expect(next.incident.id).not.toBe(result.incident.id);
+  });
+
+  it('does not create a public health incident for ignored HTTP failures during a provider outage', async () => {
+    const { implementation, calls } = provider({
+      getProductionDeployment: async () => { throw new Error('Vercel HTTP 403'); },
+      probeProduction: async () => ({ result: 'fail', statusCode: 404, evidence: 'HTTP 404' }),
+    });
+    const options = makeOptions(implementation);
+    expect((await driveFailure(options)).action).toBe('unavailable');
+    expect(calls.rollback).toBe(0);
+  });
+
   it('records unavailable remediation after rollback fails without retrying rollback', async () => {
     let rollbacks = 0;
     const { implementation } = provider({

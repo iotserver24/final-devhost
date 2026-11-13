@@ -25,7 +25,7 @@ export function useIncidents(mode: DataMode, selectedId: string | null, refresh:
     async function poll() {
       try {
         const incidents = mode === 'fixtures' ? fixtureIncidents : await fetchIncidents(abort.signal);
-        const id = selectedId && incidents.some(item => item.id === selectedId) ? selectedId : incidents[0]?.id;
+        const id = selectedId;
         const detail = id ? (mode === 'fixtures' ? incidents.find(item => item.id === id)! : await fetchIncident(id, abort.signal)) : null;
         if (!abort.signal.aborted) setSnapshot({ mode, incidents, detail, loading: false, error: null, updatedAt: new Date().toISOString() });
       } catch (error) {

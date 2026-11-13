@@ -186,10 +186,11 @@ export function Setup({ onClose }: { onClose: () => void }) {
         const poll = await fetch('/api/vercel/connect', { headers: { Accept: 'application/json' } });
         if (poll.status === 404) { window.clearInterval(timer); setError('Vercel sign-in expired. Start it again.'); return; }
         if (!poll.ok) return;
-        const result = await poll.json() as { ok?: boolean };
+        const result = await poll.json() as { ok?: boolean; restartRequired?: boolean; monitorError?: string };
         if (result.ok) {
           window.clearInterval(timer);
-          setVercel(current => current ? { ...current, status: 'Connected. Save or restart the controller to apply it.' } : current);
+          setVercel(current => current ? { ...current, status: result.restartRequired ? 'Connected. Restart the controller to apply the new credentials.' : 'Connected. Credentials updated.' } : current);
+          if (result.monitorError) setError(result.monitorError);
           await loadSettings();
         }
       }, Math.max(body.intervalMs, 5000));

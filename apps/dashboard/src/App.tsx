@@ -430,7 +430,7 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
   const selected = snapshot.detail ?? snapshot.incidents.find(item => item.id === selectedId) ?? null;
   const targets = useMemo(() => [...new Set(snapshot.incidents.map(item => item.targetId).filter((value): value is string => Boolean(value)))], [snapshot.incidents]);
   const visible = useMemo(() => targetFilter === 'all' ? snapshot.incidents : snapshot.incidents.filter(item => item.targetId === targetFilter), [snapshot.incidents, targetFilter]);
-  const counts = useMemo(() => ({ active: visible.filter(item => !['recovered', 'needs_human', 'remediation_failed', 'pr_opened'].includes(item.status)).length, recovered: visible.filter(item => item.status === 'recovered').length }), [visible]);
+  const counts = useMemo(() => ({ active: visible.filter(item => item.status !== 'recovered').length, recovered: visible.filter(item => item.status === 'recovered').length }), [visible]);
   const section = pathname.startsWith('/setup') ? 'setup' : pathname.startsWith('/watch') ? 'watch' : pathname.startsWith('/incidents/') ? 'incident' : pathname.startsWith('/incidents') ? 'incidents' : 'fleet';
 
   return <div className="app-shell">
@@ -468,9 +468,10 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
           </select>
         </label>}
       </header>
+      {watch?.outcome === 'unavailable' && <div className="monitor-blocker" role="status"><strong>Monitoring needs attention</strong><p>{watch.detail}</p><Link href="/setup">Review provider connection</Link></div>}
       {snapshot.loading && <p className="state-message">Loading incidents…</p>}
       {snapshot.error && <div className="error-box" role="alert"><strong>Controller unavailable</strong><p>{snapshot.error}</p><button onClick={() => setRefresh(value => value + 1)} type="button">Try again</button></div>}
-      {!snapshot.loading && !snapshot.error && visible.length === 0 && <p className="desk-empty">Nothing is open. The probe keeps running on Watch.</p>}
+      {!snapshot.loading && !snapshot.error && visible.length === 0 && <p className="desk-empty">No incidents recorded for this selection. Check Watch for the current monitoring status.</p>}
       <nav className="incident-board" aria-label="Incidents">
         {visible.length > 0 && <div className="incident-row incident-row-head" aria-hidden="true"><span>State</span><span>What happened</span><span>Service</span><span>Detected</span></div>}
         {visible.map(incident => <IncidentCard key={incident.id} incident={incident} selected={false} onSelect={() => undefined} href={`/incidents/${incident.id}`} />)}

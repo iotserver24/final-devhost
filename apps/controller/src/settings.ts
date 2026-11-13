@@ -55,6 +55,8 @@ export const settingFields: SettingField[] = [
   { group: 'Email', key: 'SMTP_TO', label: 'To address', secret: false },
 ];
 
+const connectedCredentials = new Set(['VERCEL_ACCESS_TOKEN', 'VERCEL_REFRESH_TOKEN']);
+
 const allowed = new Set(settingFields.map(field => field.key));
 
 const clientOwned = new Set(settingFields.filter(field => field.clientOwned).map(field => field.key));
@@ -66,8 +68,9 @@ export async function applyStoredSettings(store: Pick<IncidentStore, 'readSettin
     else delete process.env[key];
   }
   for (const [key, value] of Object.entries(saved)) {
-    // Host environment wins. A saved dashboard value fills a key the host left empty.
-    if (allowed.has(key) && !clientOwned.has(key) && value && !process.env[key]) process.env[key] = value;
+    // A completed provider login must survive restarts even if the host still has an expired token.
+    // Other host settings retain precedence.
+    if (allowed.has(key) && !clientOwned.has(key) && value && (connectedCredentials.has(key) || !process.env[key])) process.env[key] = value;
   }
 }
 
@@ -80,7 +83,7 @@ export function createSettingsApi(store: Pick<IncidentStore, 'readSettings' | 'w
       return Response.json({
         restartRequired: true,
         fields: settingFields.filter(field => !field.hidden).map(field => {
-          const fromHost = !field.clientOwned ? process.env[field.key] || '' : '';
+          const fromHost = !field.clientOwned && !(connectedCredentials.has(field.key) && saved[field.key]) ? process.env[field.key] || '' : '';
           const value = fromHost || saved[field.key] || '';
           return {
             ...field,

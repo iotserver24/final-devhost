@@ -36,6 +36,26 @@ describe('integration settings', () => {
     store.close();
   });
 
+  it('uses reconnected Vercel credentials instead of an expired host token after restart', async () => {
+    const store = new IncidentStore(':memory:');
+    const before = process.env.VERCEL_ACCESS_TOKEN;
+    try {
+      process.env.VERCEL_ACCESS_TOKEN = 'expired-host-token';
+      await store.writeSettings({ VERCEL_ACCESS_TOKEN: 'reconnected-token' });
+      await applyStoredSettings(store);
+      expect(process.env.VERCEL_ACCESS_TOKEN).toBe('reconnected-token');
+      const response = await createSettingsApi(store)(new Request('http://localhost/api/settings'));
+      const body = await response!.json();
+      const field = body.fields.find((item: { key: string }) => item.key === 'VERCEL_ACCESS_TOKEN');
+      expect(field.source).toBe('saved');
+      expect(field.value).toBe('');
+    } finally {
+      if (before === undefined) delete process.env.VERCEL_ACCESS_TOKEN;
+      else process.env.VERCEL_ACCESS_TOKEN = before;
+      store.close();
+    }
+  });
+
   it('keeps a host environment value ahead of a saved dashboard value', async () => {
     const store = new IncidentStore(':memory:');
     await store.writeSettings({ CONTROLLER_REMEDIATION_ENABLED: 'false', SMTP_TO: 'judge@example.com' });

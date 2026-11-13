@@ -913,3 +913,23 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   .telemetry-probe { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px 16px; }
   .overview { padding: 28px 20px 40px; }
 }
+
+.desk { width: 100%; max-width: 1280px; margin: 0 auto; padding: 32px clamp(20px, 4vw, 48px) 60px; }
+.desk-head { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px; margin-bottom: 24px; }
+.desk-head h1 { margin: 0 0 8px; color: var(--text); font-family: 'Space Grotesk', sans-serif; font-size: 32px; letter-spacing: -.03em; }
+.desk-head p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.5; }
+.monitor-blocker { margin-bottom: 20px; padding: 16px; border: 1px solid var(--line-strong); border-radius: 12px; background: var(--surface); color: var(--text); font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
+.monitor-blocker p { margin: 6px 0 10px; color: var(--muted); }
+.monitor-blocker a { color: var(--info); text-underline-offset: 3px; }
+.incident-row { grid-template-columns: 176px minmax(0, 1.4fr) minmax(120px, .7fr) 148px; }
+.incident-row > .status { justify-self: start; max-width: 100%; white-space: normal; }
+@media (max-width: 1000px) {
+  .incident-row { grid-template-columns: 160px minmax(0, 1fr) 140px; }
+  .incident-row-service { display: none; }
+  .incident-row-head > :nth-child(3) { display: none; }
+}
+@media (max-width: 720px) {
+  .incident-row { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  .incident-row-service { display: block; overflow-wrap: anywhere; }
+  .incident-row-copy span { white-space: normal; overflow-wrap: anywhere; }
+}

@@ -14,7 +14,7 @@ import { applyRemediationOutcome, checkProject, runtimeLogSignal, type Deploymen
 import { createControllerActions, resumeRemediation, type RemediationConfig } from './actions';
 import { applyStoredSettings, createSettingsApi } from './settings';
 import { finishRemediation } from './monitor';
-import { awaitingComment, awaitingMessage, authorMayComment, coldSandbox, planResume, readOwnerComment, selectFreshComments } from './comment-gate';
+import { awaitingComment, awaitingMessage, authorMayComment, coldSandbox, planResume, readOwnerComment, retriesStoredIncident, selectFreshComments } from './comment-gate';
 import { startLocalEngine, type LocalEngine } from './local-engine';
 import { policyFromEnvironment } from './classify';
 import { posthogFromEnvironment } from './posthog';
@@ -496,15 +496,17 @@ async function launchMonitor(config: MonitorConfig): Promise<void> {
   console.info(`Monitoring enabled for configured ${config.platform} service ${config.projectId}; rollback ${config.rollbackEnabled ? 'enabled' : 'disabled'}.`);
 }
 
-async function stopMonitor(): Promise<void> {
+async function stopMonitor(stopLocal = true): Promise<void> {
   if (logsTimer) clearInterval(logsTimer);
   logsTimer = undefined;
   if (deploymentWatchTimer) clearInterval(deploymentWatchTimer);
   deploymentWatchTimer = undefined;
   await monitorWorker?.stop();
   monitorWorker = undefined;
-  await localEngine?.stop();
-  localEngine = undefined;
+  if (stopLocal) {
+    await localEngine?.stop();
+    localEngine = undefined;
+  }
 }
 
 async function probeWatchedSite(host: string, probePath: string): Promise<{ state: 'up' | 'down' | 'unknown'; detail: string; statusCode: number | null }> {
@@ -919,7 +921,7 @@ async function integrationRoutes(request: Request, settingsStore: typeof store):
     process.env.CONTROLLER_MONITOR_ENABLED = 'true';
     await settingsStore.writeSettings({ CONTROLLER_MONITOR_ENABLED: 'true' });
     try {
-      launchMonitor(readMonitorConfig());
+      await launchMonitor(readMonitorConfig());
     } catch (error) {
       return Response.json({ error: error instanceof Error ? error.message : 'The monitor did not start.' }, { status: 400 });
     }
@@ -947,7 +949,16 @@ async function integrationRoutes(request: Request, settingsStore: typeof store):
       process.env.VERCEL_ACCESS_TOKEN = result.accessToken;
       if (result.refreshToken) process.env.VERCEL_REFRESH_TOKEN = result.refreshToken;
       vercelDevice = undefined;
-      return Response.json({ ok: true, restartRequired: true });
+      if (monitorWorker) {
+        await stopMonitor(false);
+        try { await launchMonitor(readMonitorConfig()); }
+        catch (error) {
+          watch.outcome = 'unavailable';
+          watch.detail = error instanceof Error ? error.message : 'The monitor could not restart after reconnecting.';
+          return Response.json({ ok: true, restartRequired: false, monitorError: watch.detail });
+        }
+      }
+      return Response.json({ ok: true, restartRequired: false });
     } catch {
       return Response.json({ error: 'Vercel sign-in did not finish.' }, { status: 502 });
     }
@@ -1131,9 +1142,7 @@ void (async () => {
   if (!actions.remediate) return;
   const open = await store.list(100);
   for (const incident of open) {
-    if (incident.status !== 'needs_human') continue;
-    if (awaitingComment(incident)) continue;
-    if (incident.events.some(item => item.type === 'remediation_started' || item.type === 'draft_pr')) continue;
+    if (!retriesStoredIncident(incident)) continue;
     incident.events.push({
       at: new Date().toISOString(),
       type: 'remediation_retry',

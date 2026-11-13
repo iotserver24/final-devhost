@@ -432,6 +432,44 @@ function runtimeLogContext(logs: RuntimeLog[]): string[] {
   return logs.map(log => JSON.stringify({ ...log, message: redactFull(log.message) }));
 }
 
+/** Keep public health observation independent of deployment API access. */
+async function checkWithoutDeployment(options: MonitorOptions, reason: string): Promise<MonitorResult> {
+  const at = (options.now ?? (() => new Date()))().toISOString();
+  let probe: ProbeResponse;
+  try { probe = await options.provider.probeProduction(options.projectId, options.probePath); }
+  catch { probe = { result: 'unknown', evidence: 'The public health probe could not complete.' }; }
+  const streak = await options.store.recordProbe(options.projectId, 'public-health', options.probePath, probe.result, at);
+  // A forbidden deployment API still has a public route. Show that streak.
+  // Any other provider outage stays unavailable until the same route fails three times.
+  if (/HTTP 40[13]/.test(reason) && probe.result === 'fail' && streak.consecutiveFailures < 3) {
+    return { action: 'monitor', consecutiveFailures: streak.consecutiveFailures, reason, probe };
+  }
+  if (probe.result !== 'fail' || streak.consecutiveFailures < 3 || !streak.firstFailureAt) {
+    return { action: 'unavailable', reason, probe };
+  }
+  const classification = probe.statusCode === undefined ? undefined : classifyProbe({
+    route: options.probePath, statusCode: probe.statusCode, occurrences: streak.consecutiveFailures,
+  }, options.classificationPolicy ?? defaultPolicy);
+  if (classification && !mayActOn(classification.classification) && classification.classification !== 'unknown') {
+    return { action: 'unavailable', reason, probe };
+  }
+  // Include the outage start so a later outage can open a separate incident.
+  const id = incidentId(options.projectId, `public-health:${streak.firstFailureAt}`, options.probePath);
+  const existing = await options.store.get(id);
+  if (existing) return { action: 'incident', incident: existing, duplicate: true, probe };
+  const incident: Incident = {
+    id, projectId: options.projectId, kind: 'persistent_defect', status: 'needs_human',
+    decision: 'escalate', detectedAt: at, probePath: options.probePath,
+    ...(options.serviceId ? { targetId: options.serviceId, affectedServices: [options.serviceId] } : {}),
+    evidence: [evidence(probe.evidence), evidence(reason), 'Three consecutive public health probes failed. The deployment could not be verified; automatic recovery was not attempted.'],
+    evidenceSources: ['probe'], classification: classification?.classification ?? 'unknown',
+    events: [event(at, 'detected', 'Three consecutive public health probes failed.'), event(at, 'decision', 'Restore provider access and verify the deployment before attempting recovery.')],
+    escalation: { reason: evidence(reason), at, recommendedNextStep: 'Restore provider access, then investigate the failed public endpoint and verify the deployment before recovery.' },
+  };
+  await options.store.save(incident);
+  return { action: 'incident', incident, probe };
+}
+
 export async function checkProject(options: MonitorOptions): Promise<MonitorResult> {
   const now = options.now ?? (() => new Date());
   const probePath = options.probePath;
@@ -460,9 +498,9 @@ export async function checkProject(options: MonitorOptions): Promise<MonitorResu
     current = await options.provider.getProductionDeployment(options.projectId);
   } catch (error) {
     const detail = error instanceof Error ? error.message : 'unknown error';
-    return { action: 'unavailable', reason: `Could not resolve the current production deployment. ${detail}` };
+    return checkWithoutDeployment(options, `Could not resolve the current production deployment. ${detail}`);
   }
-  if (!current) return { action: 'unavailable', reason: 'No current production deployment is available.' };
+  if (!current) return checkWithoutDeployment(options, 'No current production deployment is available.');
 
   if (options.logSignal && options.logSignal.deploymentId !== current.id) {
     return { action: 'unavailable', reason: 'Production changed after the log batch was fetched; retry with the active deployment.' };
