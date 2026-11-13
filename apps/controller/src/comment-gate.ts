@@ -18,6 +18,19 @@ export function awaitingMessage(issueNumber: number, sandboxId: string): string 
   return `Waiting for a comment on issue #${issueNumber} before writing the fix. sandbox=${sandboxId}`;
 }
 
+/**
+ * A stored needs-human incident may be retried only when a deployment was verified
+ * and nobody is still waiting on a repository comment. Public probes recorded
+ * during a provider outage have no deployment and must not start a sandbox.
+ */
+export function retriesStoredIncident(incident: Incident): boolean {
+  if (incident.status !== 'needs_human') return false;
+  if (incident.decision === 'escalate' || !incident.deploymentId) return false;
+  if (awaitingComment(incident)) return false;
+  if (incident.events.some(item => item.type === 'remediation_started' || item.type === 'draft_pr')) return false;
+  return true;
+}
+
 /** Latest cold pause after a pull request. A later comment resumes a reply, not a new diagnosis. */
 export function coldSandbox(incident: Incident): { sandboxId: string; issueNumber?: number; at: string } | null {
   const event = [...incident.events].reverse().find(item => item.type === 'cold');

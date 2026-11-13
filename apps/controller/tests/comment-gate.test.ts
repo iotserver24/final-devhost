@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import type { Incident } from '@nexathon/contracts';
-import { authorMayComment, awaitingComment, coldSandbox, planResume, readOwnerComment, selectFreshComments } from '../src/comment-gate';
+import { authorMayComment, awaitingComment, coldSandbox, planResume, readOwnerComment, retriesStoredIncident, selectFreshComments } from '../src/comment-gate';
 
 function incident(events: Incident['events'], extra: Partial<Incident> = {}): Incident {
   return {
@@ -21,6 +21,13 @@ const waiting = incident([
 ]);
 
 describe('comment gate', () => {
+  it('does not retry a public probe that was recorded without a deployment', () => {
+    expect(retriesStoredIncident(incident([], { decision: 'escalate' }))).toBe(false);
+    expect(retriesStoredIncident(incident([], { decision: 'fix_pr' }))).toBe(false);
+    expect(retriesStoredIncident(incident([], { decision: 'fix_pr', deploymentId: 'dpl_current' }))).toBe(true);
+    expect(retriesStoredIncident(waiting)).toBe(false);
+  });
+
   it('keeps the sandbox paused until a later review resumes it', () => {
     expect(awaitingComment(waiting)).toEqual({ issueNumber: 41, sandboxId: 'sb-paused', at: '2026-11-13T10:05:00.000Z' });
     const resumed = incident([
