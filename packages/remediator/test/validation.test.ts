@@ -89,6 +89,7 @@ describe('repository investigation', () => {
     const diagnose = remediationPrompt(request, { baselinePassed: true, regressionTestPath: 'apps/sample/tests/incident-demo-42.test.ts', phase: 'diagnose' });
     expect(diagnose).toContain('Run that new test once and leave it failing');
     expect(diagnose).toContain('/home/user/incident-question.txt');
+    expect(diagnose).toContain('GitHub-flavored Markdown');
     expect(diagnose).toContain('Do not edit production source');
     expect(diagnose).toContain('apps/sample/tests/incident-demo-42.test.ts');
     expect(diagnose).not.toContain('make the smallest effective fix');

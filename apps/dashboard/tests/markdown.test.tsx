@@ -13,6 +13,14 @@ test('renders agent formatting as Markdown, including lists, inline code, and fe
   expect(html).toContain('<pre><code class="language-ts">');
 });
 
+test('a document keeps real headings, lists, and inline code', () => {
+  const html = renderToStaticMarkup(<MarkdownMessage document>{'## Checkout\n\n- **Route:** `GET /api/tasks/crash`\n'}</MarkdownMessage>);
+  expect(html).toContain('markdown-document');
+  expect(html).toContain('<h2>Checkout</h2>');
+  expect(html).toContain('<code>GET /api/tasks/crash</code>');
+  expect(html).not.toContain('## Checkout');
+});
+
 test('blocks raw HTML, executable links, and remote images while allowing ordinary links', () => {
   const html = renderToStaticMarkup(<MarkdownMessage>{'<script>alert(1)</script>\n\n[bad](javascript:alert%281%29)\n\n![tracker](https://example.com/track.png)\n\n[PR](https://github.com/example/app/pull/1)'}</MarkdownMessage>);
   expect(html).not.toContain('<script');

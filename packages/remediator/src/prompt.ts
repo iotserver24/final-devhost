@@ -66,7 +66,7 @@ export function remediationPrompt(request: RemediationRequest, context?: {
         : 'The failing regression test is already in the tree. Use their answer to choose the method. Now change production code. Do not weaken the test.',
     ] : [
       '4. Run that new test once and leave it failing. Do not change production source in this step.',
-      '5. Write the method and the question for the repository owner to /home/user/incident-question.txt. Write what you found to /home/user/incident-diagnosis.txt. Reference the incident id in both files.',
+      '5. Write the method and the question for the repository owner to /home/user/incident-question.txt. Write what you found to /home/user/incident-diagnosis.txt. Reference the incident id in both files. Write both files in GitHub-flavored Markdown. Use short headings, leave a blank line before each list, and put file paths, HTTP routes, and commit SHAs in inline code.',
       '6. Stop. Do not apply a fix, commit, push, or open a pull request. The controller pauses this sandbox until that person comments. A later run applies the fix, reruns this test, and opens the pull request only if the test then passes.',
     ]),
     ...(context?.baselinePassed && context.phase !== 'fix' && context.phase !== 'reply' ? [

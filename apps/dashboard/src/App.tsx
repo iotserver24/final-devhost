@@ -23,6 +23,9 @@ import {
   RecoveryMetrics,
   Verification,
 } from './incident-detail';
+import { RichText } from './RichText';
+import { groupCopies } from './rich-text';
+import { IssueReport } from './IssueReport';
 
 const mode: DataMode = process.env.NEXT_PUBLIC_DATA_MODE === 'fixtures' ? 'fixtures' : 'live';
 
@@ -131,7 +134,7 @@ function Timeline({ events }: { events: Incident['events'] }) {
     <ol className="timeline">
       {events.map((event, index) => <li key={`${event.at}-${event.type}-${index}`}>
         <span className="timeline-dot" aria-hidden="true" />
-        <div><div className="timeline-meta"><strong>{event.type.replaceAll('_', ' ')}</strong><time dateTime={event.at}>{formatDate(event.at)}</time></div><p>{event.message}</p></div>
+        <div><div className="timeline-meta"><strong>{event.type.replaceAll('_', ' ')}</strong><time dateTime={event.at}>{formatDate(event.at)}</time></div><RichText text={event.message} /></div>
       </li>)}
     </ol>
   </section>;
@@ -270,6 +273,7 @@ function Detail({ incident, watch }: { incident: Incident; watch: WatchState | n
       <div><p className="eyebrow">Incident {incident.id}</p><h1>{incident.cause ? incident.cause.replaceAll('_', ' ') : kindLabels[incident.kind]}</h1><p className="muted">Detected {formatDate(incident.detectedAt)} · {incident.projectId}</p><Link href="/">All incidents</Link></div>
       <StatusPill status={incident.status} />
     </div>
+    <IssueReport incident={incident} />
     <section className="trigger" aria-label="What triggered this incident">
       <div>
         <span className="eyebrow">What triggered this</span>
@@ -277,8 +281,11 @@ function Detail({ incident, watch }: { incident: Incident; watch: WatchState | n
         <p>{incident.probePath ? `Probe ${incident.probePath}` : 'Deployment status check'}{incident.deploymentUrl ? ` on ${hostOf(incident.deploymentUrl)}` : ''}.</p>
       </div>
       <ul>
-        {incident.evidence.map((item, index) => <li key={`${item}-${index}`}>{item}</li>)}
-        {decision && <li>{decision.message}</li>}
+        {groupCopies(incident.evidence).map((item, index) => <li key={`${index}-${item.count}`}>
+          <RichText text={item.text} />
+          {item.count > 1 && <span className="repeat-count">repeated {item.count} times</span>}
+        </li>)}
+        {decision && <li><RichText text={decision.message} /></li>}
       </ul>
     </section>
     <section className="signal-grid" aria-label="Incident summary">
@@ -485,6 +492,20 @@ type FleetSite = {
   trackersConnected: boolean;
 };
 
+function recentActivity(incident: Incident): number {
+  return incident.events.reduce((latest, event) => Math.max(latest, Date.parse(event.at) || 0), Date.parse(incident.detectedAt) || 0);
+}
+
+/** The site card follows the incident that moved last, including one opened before a newer failed attempt. */
+function latestSiteIncident(site: FleetSite, incidents: Incident[]): Incident | undefined {
+  const related = incidents.filter(incident => {
+    if (incident.status === 'recovered') return false;
+    if (incident.targetId && incident.targetId === site.id) return true;
+    return Boolean(site.host && incident.deploymentUrl?.includes(site.host));
+  });
+  return related.sort((left, right) => recentActivity(right) - recentActivity(left))[0];
+}
+
 function Fleet({ incidents }: { incidents: Incident[] }) {
   const [sites, setSites] = useState<FleetSite[] | null>(null);
   const [error, setError] = useState('');
@@ -534,7 +555,11 @@ function Fleet({ incidents }: { incidents: Incident[] }) {
     </header>
     {error && <p className="desk-empty" role="status">Live checks paused ({error}). The site list below stays visible.</p>}
     <ul className="site-grid fleet-grid">
-      {shown.map(site => <li key={site.id}>
+      {shown.map(site => {
+        const latest = latestSiteIncident(site, incidents);
+        const incidentId = latest?.id ?? site.latestIncidentId;
+        const pullRequest = latest?.status === 'pr_opened' && latest.actionUrl?.includes('/pull/') ? latest.actionUrl : undefined;
+        return <li key={site.id}>
         <article className={`fleet-card fleet-${site.health}`}>
           <div className="fleet-card-top">
             <strong>{site.name}</strong>
@@ -543,14 +568,16 @@ function Fleet({ incidents }: { incidents: Incident[] }) {
           <p className="fleet-role">{site.role === 'dependency' ? 'Dependency' : 'Application'} · {site.host}</p>
           <dl>
             <div><dt>Health</dt><dd>{site.healthDetail}</dd></div>
-            <div><dt>Error tracking</dt><dd>{site.openIncidents} open · {site.errorTracking}{site.trackersConnected ? '' : ' · Sentry and PostHog not connected'}</dd></div>
+            <div><dt>Error tracking</dt><dd>{site.openIncidents} open · {pullRequest ? 'Pull request open' : site.errorTracking}{site.trackersConnected ? '' : ' · Sentry and PostHog not connected'}</dd></div>
           </dl>
           <div className="fleet-actions">
             <a href={site.url} target="_blank" rel="noreferrer">Open site</a>
-            {site.latestIncidentId && <Link href={`/incidents/${site.latestIncidentId}`}>Latest incident</Link>}
+            {incidentId && <Link href={`/incidents/${incidentId}`}>Latest incident</Link>}
+            {pullRequest && <a href={pullRequest} target="_blank" rel="noreferrer">Pull request</a>}
           </div>
         </article>
-      </li>)}
+      </li>;
+      })}
     </ul>
   </main>;
 }

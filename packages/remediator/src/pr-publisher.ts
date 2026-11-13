@@ -11,6 +11,52 @@ import { checkPatch, defaultPolicy as defaultDependencyPolicy, describeViolation
 const exec = promisify(execFile);
 const MAX_PATCH_BYTES = 256 * 1024;
 
+/** Pull request text: a short result, then the command logs behind disclosures. */
+export function formatPullRequestBody(input: {
+  incidentId: string;
+  issueUrl?: string;
+  baseSha: string;
+  mcpConfigured: boolean;
+  baseline: string;
+  testOutput: string;
+  buildOutput: string;
+}): string {
+  const fence = (output: string, limit: number) => ['```text', truncate(output, limit).trim(), '```'].join('\n');
+  return [
+    `Automated fix for incident \`${input.incidentId}\`. This pull request references that incident${input.issueUrl ? ` and ${input.issueUrl}` : ''}. Nothing is merged automatically.`,
+    '',
+    '## Result',
+    '',
+    '- The regression test fails on the broken revision and passes after this patch.',
+    '- The controller compared the current deployment with the immediate previous deployment on the same route before any rollback.',
+    `- Base revision: \`${input.baseSha}\``,
+    `- GitHub MCP during diagnosis: ${input.mcpConfigured ? 'yes' : 'no'}`,
+    '',
+    '<details>',
+    '<summary>Reproduction before the fix</summary>',
+    '',
+    fence(input.baseline, 2000),
+    '',
+    '</details>',
+    '',
+    '<details>',
+    '<summary>Verification after the fix</summary>',
+    '',
+    fence(input.testOutput, 3000),
+    '',
+    '</details>',
+    '',
+    '<details>',
+    '<summary>Build</summary>',
+    '',
+    fence(input.buildOutput, 2000),
+    '',
+    '</details>',
+    '',
+    'No automatic merge or production deployment was performed.',
+  ].join('\n');
+}
+
 /**
  * Load the dependency policy from REMEDIATOR_DEPENDENCY_POLICY_FILE, or use the
  * built-in defaults. A malformed policy file is fatal: widening the allowlist by
@@ -106,23 +152,15 @@ export async function publishDraftPr(request: RemediationRequest, fix: Remediati
     const pushRef = existing ? `+HEAD:refs/heads/${branch}` : `HEAD:refs/heads/${branch}`;
     await run('git', ['-c', 'credential.helper=!gh auth git-credential', 'push', 'origin', pushRef], repoDir, env);
     if (existing) return { branch, url: existing };
-    const body = [
-      `Automated fix for incident \`${request.incidentId}\`. This pull request references that incident${request.issueUrl ? ` and ${request.issueUrl}` : ''}. Nothing is merged automatically.`,
-      '',
-      'The regression test was written to fail on the broken revision and pass after this patch. The controller checked the current deployment against the immediate previous deployment on the same route before any rollback.',
-      '',
-      `Base revision: \`${fix.baseSha}\``,
-      `GitHub MCP configured during diagnosis: ${fix.mcpConfigured ? 'yes' : 'no'}`,
-      '',
-      '### Reproduction before fix (failed as expected)',
-      '```text', truncate(fix.baseline, 2000), '```',
-      '### Verification after fix',
-      '```text', truncate(fix.testOutput, 3000), '```',
-      '### Build',
-      '```text', truncate(fix.buildOutput, 2000), '```',
-      '',
-      'No automatic merge or production deployment was performed.',
-    ].join('\n');
+    const body = formatPullRequestBody({
+      incidentId: request.incidentId,
+      issueUrl: request.issueUrl,
+      baseSha: fix.baseSha,
+      mcpConfigured: fix.mcpConfigured,
+      baseline: fix.baseline,
+      testOutput: fix.testOutput,
+      buildOutput: fix.buildOutput,
+    });
     await writeFile(bodyFile, body, { mode: 0o600 });
     const url = await run('gh', ['pr', 'create', '--repo', request.repository, '--base', 'main', '--head', branch, '--title', `fix: incident ${request.incidentId}`, '--body-file', bodyFile], repoDir, env);
     return { branch, url };

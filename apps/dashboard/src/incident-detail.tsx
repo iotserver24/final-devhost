@@ -1,4 +1,6 @@
 import type { Incident } from '@nexathon/contracts';
+import { RichText } from './RichText';
+import { groupCopies } from './rich-text';
 
 function formatDuration(from: string, to: string) {
   const ms = Date.parse(to) - Date.parse(from);
@@ -195,20 +197,28 @@ export function EvidenceItems({ items, fallback }: { items: Incident['evidenceIt
             {item.serviceId && <span className="mono">{item.serviceId}</span>}
             <time dateTime={item.at}>{formatStamp(item.at)}</time>
           </div>
-          <p>{item.observation}</p>
+          <RichText text={item.observation} />
         </li>;
       })}
     </ul>
     {fallback.length > 0 && <details className="evidence-extra">
-      <summary>Additional recorded evidence ({fallback.length})</summary>
-      <ul>{fallback.map((item, index) => <li key={`${item}-${index}`}>{item}</li>)}</ul>
+      <summary>Additional recorded evidence ({groupCopies(fallback).length} unique of {fallback.length})</summary>
+      <ul>{groupCopies(fallback).map((item, index) => <li key={`${index}-${item.count}`}>
+        <RichText text={item.text} />
+        {item.count > 1 && <span className="repeat-count">repeated {item.count} times</span>}
+      </li>)}</ul>
     </details>}
   </section>;
 }
 
-/** Headline for cards/detail: the controller's inference if present, else the latest event. */
+/** Headline for cards/detail: the published pull request, else the controller's inference, else the latest event that is not a mail failure. */
 export function incidentHeadline(incident: Incident) {
+  const published = incident.status === 'pr_opened'
+    ? [...incident.events].reverse().find(event => event.type === 'draft_pr')
+    : undefined;
+  if (published) return published.message;
   const inference = incident.evidenceItems?.find(item => item.inferenceOf !== undefined);
   if (inference) return inference.observation;
-  return incident.events.at(-1)?.message ?? incident.evidence[0] ?? 'No evidence recorded.';
+  const visible = [...incident.events].reverse().find(event => event.type !== 'notification_failed' && event.type !== 'notification');
+  return visible?.message ?? incident.events.at(-1)?.message ?? incident.evidence[0] ?? 'No evidence recorded.';
 }

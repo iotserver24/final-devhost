@@ -1044,6 +1044,10 @@ const server = Bun.serve({
         const health = await probeWatchedSite(service.productionHost, service.probePath);
         const related = incidents.filter(incident => incident.targetId === service.id || incident.projectId === service.vercelProjectId);
         const open = related.filter(incident => incident.status !== 'recovered');
+        const latest = [...open].sort((left, right) => {
+          const activity = (incident: typeof left) => incident.events.reduce((newest, event) => Math.max(newest, Date.parse(event.at) || 0), Date.parse(incident.detectedAt) || 0);
+          return activity(right) - activity(left);
+        })[0];
         const trackers = [service.sentryProject ? `Sentry ${service.sentryProject}` : '', service.posthogProject ? `PostHog ${service.posthogProject}` : ''].filter(Boolean);
         return {
           id: service.id,
@@ -1056,7 +1060,7 @@ const server = Bun.serve({
           healthDetail: health.detail,
           statusCode: health.statusCode,
           openIncidents: open.length,
-          latestIncidentId: open[0]?.id ?? null,
+          latestIncidentId: latest?.id ?? null,
           errorTracking: trackers.length ? trackers.join(' · ') : 'Sentinel logs',
           trackersConnected: trackers.length > 0,
         };
