@@ -160,6 +160,17 @@ const hub = new ActivityHub({
   saveRun: run => { void Promise.resolve(store.saveAgentRun(run)).catch(() => undefined); },
   saveEvent: (runId, event) => { void Promise.resolve(store.saveAgentEvent(runId, event)).catch(() => undefined); },
 });
+const installationRepositoryCache = new Map<string, { at: number; names: string[] }>();
+
+async function cachedInstallationRepositories(appId: string, pem: string, installationId: string): Promise<string[]> {
+  const key = `${appId}:${installationId}`;
+  const cached = installationRepositoryCache.get(key);
+  if (cached && Date.now() - cached.at < 60_000) return cached.names;
+  const names = await listInstallationRepositories(appId, pem, installationId);
+  installationRepositoryCache.set(key, { at: Date.now(), names });
+  return names;
+}
+
 const actions = createControllerActions({ slackWebhookUrl: process.env.SLACK_WEBHOOK_URL, remediation, settings: store }, hub);
 const incidentApi = createIncidentApi(store);
 const settingsApi = createSettingsApi(store);
@@ -533,8 +544,13 @@ async function integrationRoutes(request: Request, settingsStore: typeof store):
     const installationId = process.env.GITHUB_INSTALLATION_ID;
     if (!appId || !pem || !installationId) return Response.json({ error: 'Give the GitHub bot access before choosing a repository.' }, { status: 409 });
     try {
-      const repositories = await listInstallationRepositories(appId, pem, installationId);
-      return Response.json({ repositories });
+      const repositories = await cachedInstallationRepositories(appId, pem, installationId);
+      const query = url.searchParams.get('q')?.trim().toLowerCase() ?? '';
+      const matched = query ? repositories.filter(name => name.toLowerCase().includes(query)) : repositories;
+      return Response.json(
+        { repositories: matched.slice(0, query ? 50 : matched.length), total: repositories.length, matched: matched.length },
+        { headers: { 'Cache-Control': 'no-store' } },
+      );
     } catch {
       return Response.json({ error: 'The GitHub bot could not list repositories.' }, { status: 502 });
     }

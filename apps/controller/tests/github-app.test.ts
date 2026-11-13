@@ -1,7 +1,7 @@
 import { generateKeyPairSync } from 'node:crypto';
 import { describe, expect, it } from 'bun:test';
 import { createHmac } from 'node:crypto';
-import { appJwt, disconnectFields, githubConnectPage, githubConnectTarget, installationRepositoryNames, matchingVercelProject, verifyGithubWebhook } from '../src/github-app';
+import { appJwt, disconnectFields, githubConnectPage, githubConnectTarget, installationRepositoryNames, matchingVercelProject, nextPageUrl, verifyGithubWebhook } from '../src/github-app';
 
 describe('github app connect', () => {
   it('builds a manifest that asks for repo and pull request access', () => {
@@ -30,6 +30,13 @@ describe('github app connect', () => {
   it('sends setup to the existing bot install page', () => {
     expect(githubConnectTarget('sentinel-ai-bot', '123')).toEqual({ redirect: 'https://github.com/apps/sentinel-ai-bot/installations/new' });
     expect('error' in githubConnectTarget(undefined, '123')).toBe(true);
+  });
+
+  it('follows the GitHub next-page link and ignores other relations', () => {
+    const link = '<https://api.github.com/installation/repositories?per_page=100&page=2>; rel="next", <https://api.github.com/installation/repositories?per_page=100&page=6>; rel="last"';
+    expect(nextPageUrl(link)).toBe('https://api.github.com/installation/repositories?per_page=100&page=2');
+    expect(nextPageUrl('<https://evil.example/repositories?page=2>; rel="next"')).toBeNull();
+    expect(nextPageUrl(null)).toBeNull();
   });
 
   it('reads installation repositories and matches a Vercel domain', () => {
