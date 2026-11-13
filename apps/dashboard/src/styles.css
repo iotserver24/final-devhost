@@ -428,6 +428,12 @@ h1, h2, strong { font-family: 'IBM Plex Sans', sans-serif; }
 }
 .login-card input::placeholder, .setup input::placeholder { color: var(--faint); }
 .login-card .action { width: 100%; margin-top: 20px; }
+.login-demo { display: grid; gap: 10px; margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--line); }
+.login-demo p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.login-demo-button { min-height: 40px; width: 100%; padding: 10px 14px; border: 1px solid var(--line-strong); border-radius: 7px; background: var(--surface); color: var(--text); font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
+.login-demo-button:hover { border-color: var(--accent); background: var(--surface-raised); }
+.login-demo-button:disabled { cursor: wait; opacity: .6; }
+.login-demo-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .login-error { margin: 13px 0 0; color: var(--danger); font-size: 12px; }
 
 .setup { max-width: 1100px; }

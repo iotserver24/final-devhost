@@ -621,6 +621,14 @@ function Login({ onAuthenticated }: { onAuthenticated: () => void }) {
     <label>Password<input type="password" autoComplete="current-password" value={password} onChange={event => setPassword(event.target.value)} required /></label>
     {error && <p className="login-error" role="alert">{error}</p>}
     <button className="action" disabled={busy} type="submit">{busy ? 'Signing in…' : 'Sign in'}</button>
+    <div className="login-demo">
+      <p>Here to explore the demo?</p>
+      <button className="login-demo-button" disabled={busy} type="button" onClick={() => {
+        setUsername('keel');
+        setPassword('keel-local-demo');
+        setError('');
+      }}>Fill demo credentials</button>
+    </div>
   </form></main>;
 }
 
