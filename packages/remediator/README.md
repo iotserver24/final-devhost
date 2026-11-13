@@ -1,4 +1,4 @@
-# Remediator — Anish Kumar
+# Remediator
 
 Bun/TypeScript package for the **fix-PR path only**. The trusted local controller decides whether to dispatch a persistent defect or broken build. This package never performs a Vercel rollback and never merges a PR.
 
@@ -53,7 +53,7 @@ bun run --cwd packages/remediator demo:fix --sha=$(git rev-parse origin/main) --
 
 ## Controller integration
 
-Ronit should add `"@nexathon/remediator": "workspace:*"` to `apps/controller/package.json` and run `bun install` at the root before importing this package. The controller owns the incident-to-request mapping and keeps its GitHub write token locally.
+Add `"@nexathon/remediator": "workspace:*"` to `apps/controller/package.json` and run `bun install` at the root before importing this package. The controller owns the incident-to-request mapping and keeps its GitHub write token locally.
 
 ```ts
 import { generateFixInE2B, publishDraftPr } from '@nexathon/remediator';
@@ -92,8 +92,8 @@ if (fix.ok) {
 
 ## Integration blockers / next steps
 
-- Ronit must add the sample app, a reproducible failing-test fixture, and the controller's shared incident contract. Then connect the controller's `fix_pr` decision to `generateFixInE2B` and persist its result.
-- Anish needs a **dedicated** model API credential and a read-only GitHub MCP token before the first full fix run. E2B sandbox creation, preinstalled Bun/Supercharge versions, sample install/build, and the deterministic fixture have been smoke-tested with the available E2B key; **the model-driven fix and PR creation are not yet end-to-end verified**.
+- The sample app, a reproducible failing-test fixture, and the controller's shared incident contract must exist, and the controller's `fix_pr` decision must be connected to `generateFixInE2B` with its result persisted.
+- A **dedicated** model API credential and a read-only GitHub MCP token are needed before the first full fix run. E2B sandbox creation, preinstalled Bun/Supercharge versions, sample install/build, and the deterministic fixture have been smoke-tested with the available E2B key; **the model-driven fix and PR creation are not yet end-to-end verified**.
 - The published Supercharge release used here is 1.4.22, the current Latest tag on https://github.com/supercharge-cli/supercharge-releases/releases. If the release changes, verify the installer asset and CLI flags before upgrading the pinned version.
 
 ## Agent transcript

@@ -1,4 +1,4 @@
-# Local controller — Ronit
+# Local controller
 
 The controller provides PostgreSQL incident/probe-streak/rollback-claim storage, a read-only incidents API, a periodic worker, and runtime monitors for Vercel, Railway, Render, and Coolify. The monitor supports same-route current/predecessor probes, a three-failure threshold, deployment-log evidence, project/recency checks, one rollback claim per deployment, bounded post-rollback verification, failed-build detection, and optional remediator/notifier dispatch. Monitoring, rollback, and remediation are disabled by default.
 

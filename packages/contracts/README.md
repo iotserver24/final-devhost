@@ -1,4 +1,4 @@
-# Shared incident contract — Ronit
+# Shared incident contract
 
 `src/index.ts` exports the shared `Incident` and `IncidentEvent` types, state unions, and the controller-to-remediator request/result boundary. Import incident types from `@nexathon/contracts`; the notifier and dashboard use this package as their shared source of truth.
 

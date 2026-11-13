@@ -12,7 +12,7 @@ import { ActionBroker, type DemoEnvironment } from './broker';
 import { LocalDemoAdapter, serviceName } from './local-adapter';
 
 /**
- * BE2 local incident engine: monitors BE1's TaskFlow services and the
+ * Local incident engine: monitors the TaskFlow demo services and the
  * end-to-end journey, builds evidence-backed diagnoses for the four demo
  * faults, acts only through the ActionBroker, verifies recovery, and
  * escalates what it cannot safely automate. Fault labels from the injector

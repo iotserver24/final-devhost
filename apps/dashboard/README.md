@@ -1,4 +1,4 @@
-# Incident dashboard — Madvit
+# Incident dashboard
 
 Sentinel is a dark local incident control room built with Next.js. It shows probe and deployment evidence, the safety decision, rollback or draft PR status, and live agent activity. The live dashboard requires the controller's `.env` username/password and presents a login before fetching incident data.
 

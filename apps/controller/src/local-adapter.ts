@@ -1,10 +1,10 @@
 import type { DemoServiceId, HealthState, ServiceStatus } from '@nexathon/contracts';
 
 /**
- * Adapter for BE1's local TaskFlow demo environment. All operations hit the
- * narrowly scoped fault/reset API BE1 exposes on the compose network — never
- * the Docker socket or arbitrary host commands. Endpoints are configurable so
- * tests can point at a stub server.
+ * Adapter for the local TaskFlow demo environment. All operations hit the
+ * narrowly scoped fault/reset API the demo environment exposes on the compose
+ * network — never the Docker socket or arbitrary host commands. Endpoints are
+ * configurable so tests can point at a stub server.
  */
 
 export interface LocalAdapterOptions {

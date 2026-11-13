@@ -40,7 +40,7 @@ export async function readJson(path: string, signal: AbortSignal, fetcher = glob
 export async function fetchIncidents(signal: AbortSignal, fetcher = globalThis.fetch) {
   const data = await readJson('/api/incidents', signal, fetcher);
   try { return parseIncidentList(data); }
-  catch { throw new ApiError('The incident list does not match the README contract. Ask Ronit to check the API response.'); }
+  catch { throw new ApiError('The incident list does not match the documented API contract. Check the controller API response.'); }
 }
 
 export async function fetchIncident(id: string, signal: AbortSignal, fetcher = globalThis.fetch) {

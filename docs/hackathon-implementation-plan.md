@@ -8,16 +8,16 @@ Turn Sentinel into a demonstrable incident-response agent for **“The On-Call E
 
 Build on the existing controller, dashboard, Supercharge/E2B workflow, and cloud providers. Do not present fixtures, mocked tests, or a draft PR as a live recovered service.
 
-## Team ownership
+## Component ownership
 
-| Developer | Role | Ownership |
-| --- | --- | --- |
-| Frontend 1 (FE1) | Incident dashboard | Incident details, evidence, timeline, recovery metrics, and escalation |
-| Frontend 2 (FE2) | Demo experience | TaskFlow user interface, service status, fault controls, dry run, and reset |
-| Backend 1 (BE1) | Demo infrastructure | Multi-service target, fault injection and reset, health checks, logs, and fault timing |
-| Backend 2 (BE2) | Sentinel response | Monitoring, diagnosis, action policy, verification, escalation, and APIs |
+| Component | Ownership |
+| --- | --- |
+| Incident dashboard | Incident details, evidence, timeline, recovery metrics, and escalation |
+| Demo experience | TaskFlow user interface, service status, fault controls, dry run, and reset |
+| Demo infrastructure | Multi-service target, fault injection and reset, health checks, logs, and fault timing |
+| Sentinel response | Monitoring, diagnosis, action policy, verification, escalation, and APIs |
 
-Each developer owns the tests relevant to their work. Agree on contracts before implementation and coordinate edits to shared files.
+Each component owner owns the tests relevant to their work. Agree on contracts before implementation and coordinate edits to shared files.
 
 ## Architecture and trust boundary
 
@@ -40,9 +40,9 @@ Each developer owns the tests relevant to their work. Agree on contracts before 
 
 The injector may record the expected answer for evaluation, but must not give that answer to Sentinel's diagnosis logic. Diagnosis must use observed evidence. If an action cannot be safely automated, propose it for human approval and explain the limitation.
 
-## FE1 — Incident dashboard
+## Incident dashboard
 
-**Own:** incident list/detail, evidence, timeline, policy decisions, recovery metrics, and escalation. Coordinate API types with BE2.
+**Own:** incident list/detail, evidence, timeline, policy decisions, recovery metrics, and escalation. Coordinate API types with the controller.
 
 - Show affected services, status, symptoms, likely cause, and uncertainty. Distinguish observation from inference.
 - Show a timeline of detection, diagnosis, proposed action, policy decision, execution, verification, and escalation.
@@ -54,20 +54,20 @@ The injector may record the expected answer for evaluation, but must not give th
 
 **Done when:** a judge can see a real incident's evidence, cause, action, verification, and timing without relying on fixtures.
 
-## FE2 — Demo application and controls
+## Demo application and controls
 
-**Own:** TaskFlow user journey and demo controls. Coordinate the fault API with BE1 and dry-run behavior with BE2.
+**Own:** TaskFlow user journey and demo controls. Coordinate the fault API with the demo infrastructure and dry-run behavior with the controller.
 
 - Make the user-facing workflow genuinely depend on the task API and dependency service; do not simulate service status in the browser.
 - Show each service's real health, last check, and end-to-end request result, including unknown/unreachable states.
 - Add local-only controls for the four faults, an unsafe/ambiguous case, and reset. Show current state and errors.
-- Add a clearly labelled dry-run control backed by BE2's real policy evaluation; it must not change the target.
+- Add a clearly labelled dry-run control backed by the controller's real policy evaluation; it must not change the target.
 - Disable conflicting operations while injection or reset is running. Ensure demo controls and reset are restricted to demo resources.
 - Add focused tests for fault controls, reset, unreachable services, and dry-run display.
 
 **Done when:** a judge can see TaskFlow working, introduce a fault, observe its real impact, and reset the demo without editing code or restarting everything manually.
 
-## BE1 — Multi-service target and faults
+## Multi-service target and faults
 
 **Own:** target services, local Compose setup, fault injection/reset, service health/logs, and injection timestamps.
 
@@ -81,26 +81,26 @@ The injector may record the expected answer for evaluation, but must not give th
 
 **Done when:** each fault can be introduced and reset independently on a laptop, with useful real evidence available to Sentinel.
 
-## BE2 — Monitoring, safety, and response
+## Monitoring, safety, and response
 
 **Own:** controller integration, local adapter/action broker, diagnosis, policy enforcement, verification, escalation, persisted incident data, and dashboard APIs.
 
 - Monitor each service and an end-to-end operation. Associate signals and changes with incidents; provide evidence-backed likely causes or an explicit unknown.
-- Connect BE1's real signals through a local adapter while retaining existing cloud provider support.
+- Connect the demo environment's real signals through a local adapter while retaining existing cloud provider support.
 - Enforce explicit target/action allowlists, validated parameters, bounded operations, one automatic attempt per incident, and audit records independently of the agent. Reject arbitrary commands and unrelated targets.
 - Implement dry run through the same policy path as execution, returning the proposed operation and decision without mutation.
 - Confirm a known-good version or value before reverting. Verify service health and the user journey after every action. Do not claim recovery or repeatedly mutate when verification fails.
 - Escalate ambiguous evidence, missing known-good state, rejected actions, action failures, and failed verification. Surface reasons and record notification failures separately.
 - Record fault, detection, decision, action, verification, and escalation timestamps when available. Calculate durations without inventing unknown timestamps.
 - Expose incident, service-status, action/dry-run, and event interfaces; validate requests and restrict demo operations to the local environment.
-- Test the four diagnosis/action paths, forbidden actions, dry-run no-mutation, single attempt, failed verification, escalation, and timing. Run integration tests with BE1's services.
+- Test the four diagnosis/action paths, forbidden actions, dry-run no-mutation, single attempt, failed verification, escalation, and timing. Run integration tests with the demo services.
 - Document actual credentials and permissions; demonstrate denied actions. Avoid unsupported claims of absolute security or least privilege.
 
 **Done when:** all four faults produce evidence-backed diagnoses and guarded, verified responses; the unsafe case is denied or escalated; and the dashboard receives accurate state and timings.
 
 ## Shared interface agreement
 
-Before implementation, BE1 and BE2 agree on service identity, health, logs, recent-change evidence, fault/reset behavior, and broker requests. BE2 and both frontend developers agree on endpoint names and request/response examples. Use `packages/contracts` as the shared source of truth where appropriate. These fields are proposed, not claims about existing implementation.
+Before implementation, the demo-infrastructure and controller owners agree on service identity, health, logs, recent-change evidence, fault/reset behavior, and broker requests. The controller and dashboard owners agree on endpoint names and request/response examples. Use `packages/contracts` as the shared source of truth where appropriate. These fields are proposed, not claims about existing implementation.
 
 | Data | Minimum fields |
 | --- | --- |
@@ -114,11 +114,11 @@ Before implementation, BE1 and BE2 agree on service identity, health, logs, rece
 
 ## Work sequence
 
-1. **All four:** agree on service names, fault behavior, ownership, endpoints, and event shapes.
-2. **BE1:** implement services and fault/reset interfaces. **BE2:** define the broker policy and develop against test doubles. **FE1 and FE2:** build against agreed contracts using clearly labelled development fixtures.
-3. **BE1 and BE2:** connect real signals, actions, and verification; test boundaries before enabling automatic actions.
-4. **FE1 and FE2:** connect real APIs and handle errors. Keep fixture mode visibly labelled.
-5. **All four:** run the full acceptance matrix after a clean reset, record actual results, and fix integration issues.
+1. **All components:** agree on service names, fault behavior, ownership, endpoints, and event shapes.
+2. **Demo infrastructure:** implement services and fault/reset interfaces. **Controller:** define the broker policy and develop against test doubles. **Dashboard and demo UI:** build against agreed contracts using clearly labelled development fixtures.
+3. **Demo infrastructure and controller:** connect real signals, actions, and verification; test boundaries before enabling automatic actions.
+4. **Dashboard and demo UI:** connect real APIs and handle errors. Keep fixture mode visibly labelled.
+5. **All components:** run the full acceptance matrix after a clean reset, record actual results, and fix integration issues.
 6. **Optional:** add Sentry as an evidence source and demonstrate a Supercharge/E2B tested draft PR. Neither should be required for the three local scenarios.
 
 ## Final acceptance matrix

@@ -150,8 +150,8 @@ describe('configurable target stays a single exact repository', () => {
   };
 
   test('accepts the configured repository and subtree', () => {
-    withEnv({ REMEDIATOR_ALLOWED_REPOSITORY: 'Ronit-Pai/testsite', REMEDIATOR_ALLOWED_PATH_PREFIX: 'src/' }, () => {
-      const target = { ...request, repository: 'Ronit-Pai/testsite' };
+    withEnv({ REMEDIATOR_ALLOWED_REPOSITORY: 'iotserver24/nexathon', REMEDIATOR_ALLOWED_PATH_PREFIX: 'src/' }, () => {
+      const target = { ...request, repository: 'iotserver24/nexathon' };
       expect(() => validateRequest(target)).not.toThrow();
       expect(() => validateChangedFiles(['src/app/api/tasks/route.ts'])).not.toThrow();
       expect(() => validateRequest(request)).toThrow('allowlisted');
@@ -160,8 +160,8 @@ describe('configurable target stays a single exact repository', () => {
   });
 
   test('rejects wildcard or malformed overrides', () => {
-    withEnv({ REMEDIATOR_ALLOWED_REPOSITORY: 'Ronit-Pai/*' }, () => {
-      expect(() => validateRequest({ ...request, repository: 'Ronit-Pai/*' })).toThrow('not a valid');
+    withEnv({ REMEDIATOR_ALLOWED_REPOSITORY: 'iotserver24/*' }, () => {
+      expect(() => validateRequest({ ...request, repository: 'iotserver24/*' })).toThrow('not a valid');
     });
     withEnv({ REMEDIATOR_ALLOWED_PATH_PREFIX: '/' }, () => {
       expect(() => validateChangedFiles(['src/app/page.tsx'])).toThrow('not a valid');
@@ -169,8 +169,8 @@ describe('configurable target stays a single exact repository', () => {
   });
 
   test('keeps the reproduction fixture inside the configured subtree', () => {
-    withEnv({ REMEDIATOR_ALLOWED_REPOSITORY: 'Ronit-Pai/testsite', REMEDIATOR_ALLOWED_PATH_PREFIX: 'src/' }, () => {
-      const target = { ...request, repository: 'Ronit-Pai/testsite' };
+    withEnv({ REMEDIATOR_ALLOWED_REPOSITORY: 'iotserver24/nexathon', REMEDIATOR_ALLOWED_PATH_PREFIX: 'src/' }, () => {
+      const target = { ...request, repository: 'iotserver24/nexathon' };
       expect(() => validateRequest({ ...target, reproductionFixture: { path: 'src/tests/filter.test.ts', content: 'test("x", () => {});' } })).not.toThrow();
       expect(() => validateRequest({ ...target, reproductionFixture: { path: 'apps/sample/tests/filter.test.ts', content: 'test("x", () => {});' } })).toThrow('safe');
     });

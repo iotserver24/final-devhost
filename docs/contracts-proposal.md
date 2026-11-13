@@ -1,12 +1,12 @@
 # Sentinel shared contracts proposal (v1 — for team agreement)
 
-Owner: BE2. Status: **PROPOSED, not implemented.** Plan step 1 requires BE1, BE2, FE1, FE2 to agree on these before implementation. Comment/edits welcome; silence is not agreement.
+Status: **PROPOSED, not implemented.** Plan step 1 requires the component owners to agree on these before implementation. Comment/edits welcome; silence is not agreement.
 
 Design rule: **additive only.** Existing `Incident`, `IncidentKind`, `IncidentStatus`, `IncidentDecision` in `packages/contracts/src/index.ts` keep their current members and meaning (cloud path keeps working). Everything below extends unions or adds new optional fields/types. `apps/dashboard/src/incident.ts` validates kinds/statuses/decisions with hardcoded arrays — extending a union requires updating that parser in the same PR.
 
 ## 1. Service identity
 
-Fixed service IDs for the demo target (BE1 to confirm names/ports):
+Fixed service IDs for the demo target (demo infrastructure owner to confirm names/ports):
 
 | Service ID | Role |
 | --- | --- |
@@ -27,7 +27,7 @@ export interface ServiceStatus {
 }
 ```
 
-`unknown` is a real state: unreachable, timeout, or not yet checked. FE2 renders it; BE2 produces it.
+`unknown` is a real state: unreachable, timeout, or not yet checked. The dashboard renders it; the controller produces it.
 
 ## 3. Incident extensions
 
@@ -86,12 +86,12 @@ export interface EscalationRecord {
 }
 ```
 
-`Incident` gains: `evidenceItems?: EvidenceItem[]`, `actions?: ActionRecord[]`, `verification?: VerificationRecord`, `escalation?: EscalationRecord`, and timing fields (§6). FE1 rule from the plan: **do not show recovery unless `verification.passed` is true.**
+`Incident` gains: `evidenceItems?: EvidenceItem[]`, `actions?: ActionRecord[]`, `verification?: VerificationRecord`, `escalation?: EscalationRecord`, and timing fields (§6). Dashboard rule from the plan: **do not show recovery unless `verification.passed` is true.**
 
 ## 4. Timing (new optional fields, never invented)
 
 ```ts
-faultInjectedAt?: string;    // written by BE1's injector only; absent if unknown
+faultInjectedAt?: string;    // written by the demo fault injector only; absent if unknown
 detectedAt: string;          // existing
 decidedAt?: string;          // policy decision time
 actionAt?: string;           // execution start
@@ -100,7 +100,7 @@ verifiedRecoveryAt?: string; // set only when verification passed
 
 Durations (`faultToDetectionMs`, `detectionToRecoveryMs`, `faultToRecoveryMs`) are **computed at read time** by the API from these fields; missing inputs → field absent, never zero or guessed.
 
-## 5. Action broker boundary (BE2-internal, but contracts are shared)
+## 5. Action broker boundary (controller-internal, but contracts are shared)
 
 The broker is the only path from Sentinel to the demo environment. Requests are fixed operations with validated parameters — no arbitrary commands, no Docker socket access from agent/controller code.
 
@@ -119,13 +119,13 @@ export interface BrokerDecision {
 
 Broker-enforced invariants (independent of the controller/agent):
 - Target allowlist per action kind (e.g. only `dependency` may be restarted).
-- Parameter validation against known-good values BE1 exposes (`restore_config` must name a value BE1 published as known-good).
+- Parameter validation against known-good values the demo environment exposes (`restore_config` must name a value the demo environment published as known-good).
 - Max **one** automatic attempt per incident (dry runs do not consume the attempt).
 - Every request, allowed or denied, appends an audit record.
 
 Dry run uses the **same** policy evaluation as execution with `dryRun: true`; it returns the proposed operation + decision and performs no mutation.
 
-## 6. BE1 fault/reset API (FE2 + BE2 consume; BE1 owns)
+## 6. Demo fault/reset API (dashboard + controller consume; demo infrastructure owns)
 
 All demo-control endpoints are local-only (bound to localhost / compose network).
 
@@ -139,9 +139,9 @@ All demo-control endpoints are local-only (bound to localhost / compose network)
 | `POST /api/demo/reset` | restore all services to verified known-good |
 | `GET /api/demo/state` | current fault state + `faultInjectedAt` timestamps |
 
-Known-good revisions/config values are exposed via a read endpoint so BE2 can satisfy "confirm a known-good version or value before reverting." The injector may record which fault is active for evaluation, but that label must **not** appear in any health/log/change evidence Sentinel reads.
+Known-good revisions/config values are exposed via a read endpoint so the controller can satisfy "confirm a known-good version or value before reverting." The injector may record which fault is active for evaluation, but that label must **not** appear in any health/log/change evidence Sentinel reads.
 
-## 7. BE2 dashboard APIs (FE1 consumes)
+## 7. Controller dashboard APIs (dashboard consumes)
 
 Existing: `GET /api/incidents`, `GET /api/incidents/:id`, agent-run SSE (unchanged).
 
@@ -153,8 +153,8 @@ Existing: `GET /api/incidents`, `GET /api/incidents/:id`, agent-run SSE (unchang
 
 ## 8. Decisions needed from the team
 
-1. Service IDs/ports (§1) — BE1 proposes, all confirm.
-2. Additive-union approach vs. a separate demo `SentinelIncident` type — BE2 recommends additive (§3).
-3. Does FE1 need per-check verification detail in the UI, or just pass/fail + evidence? (§3)
-4. Demo detection threshold: existing 3-consecutive-failure rule is slow for a live demo. Propose: 2 consecutive for demo profile, 3 for cloud profile. BE2 decides defaults; team confirms.
+1. Service IDs/ports (§1) — demo infrastructure proposes, all confirm.
+2. Additive-union approach vs. a separate demo `SentinelIncident` type — controller recommends additive (§3).
+3. Does the dashboard need per-check verification detail in the UI, or just pass/fail + evidence? (§3)
+4. Demo detection threshold: existing 3-consecutive-failure rule is slow for a live demo. Propose: 2 consecutive for demo profile, 3 for cloud profile. Controller decides defaults; team confirms.
 5. Escalation notification channel for the demo (Slack webhook? none, dashboard-only?) — plan says notification failures must not hide incidents.

@@ -63,7 +63,7 @@ async function probeService(
   }
 }
 
-// BE2's real policy evaluation for a dry run: the target must not change, and
+// The controller's real policy evaluation for a dry run: the target must not change, and
 // the decision is derived from the live probe results, not from a simulated
 // status. An unreachable service is treated as not healthy.
 export function evaluatePolicy(probes: ProbeResult[]): DryRunOutcome {

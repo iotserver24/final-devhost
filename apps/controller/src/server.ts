@@ -539,7 +539,7 @@ async function probeWatchedSite(host: string, probePath: string): Promise<{ stat
   return { state: down ? 'down' : 'up', detail: results.join(' · '), statusCode };
 }
 
-// --- Local demo monitor (BE2): watches BE1's TaskFlow services and acts through the broker. ---
+// --- Local demo monitor: watches the TaskFlow demo services and acts through the broker. ---
 let localEngine: LocalEngine | undefined;
 
 function localDemoBaseUrl(): string | undefined {
@@ -1098,7 +1098,7 @@ const server = Bun.serve({
       if (request.method !== 'GET') return Response.json({ error: 'Method not allowed.' }, { status: 405 });
       return Response.json({ ...watch, now: new Date().toISOString() });
     }
-    // --- BE2 local demo endpoints ---
+    // --- Local demo endpoints ---
     if (url.pathname === '/api/services' && request.method === 'GET') {
       if (!localEngine) return Response.json({ error: 'Local demo monitor is not running. Set CONTROLLER_DEMO_BASE_URL and restart.' }, { status: 409 });
       try {

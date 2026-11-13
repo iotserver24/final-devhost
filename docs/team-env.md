@@ -34,8 +34,8 @@ VERCEL_TEAM_ID=team_A6lEzmIS4uA1INngR0Lhxuid
 CONTROLLER_ROLLBACK_PROJECT_ID=prj_mzsgdAEYOn2wRW8E8KLETRIsblsD
 
 # --- AI remediation (optional E2B draft-PR path; enable only with all REMEDIATOR_* set) ---
-REMEDIATOR_REPOSITORY=Ronit-Pai/testsite
-REMEDIATOR_ALLOWED_REPOSITORY=Ronit-Pai/testsite
+REMEDIATOR_REPOSITORY=iotserver24/nexathon
+REMEDIATOR_ALLOWED_REPOSITORY=iotserver24/nexathon
 REMEDIATOR_ALLOWED_PATH_PREFIX=src/
 REMEDIATOR_SETUP_COMMAND="bun install --frozen-lockfile"
 REMEDIATOR_REPRODUCE_COMMAND="bun test src/tests/filter.repro.test.ts"

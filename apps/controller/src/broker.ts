@@ -8,14 +8,14 @@ import type { BrokerDecision, BrokerRequest } from '@nexathon/contracts';
  */
 
 export interface KnownGoodState {
-  /** BE1-published known-good revision for the task API. */
+  /** Known-good revision for the task API published by the demo environment. */
   revision: string;
-  /** BE1-published known-good values per allowlisted config key. */
+  /** Known-good values per allowlisted config key published by the demo environment. */
   configValues: Map<string, string>;
 }
 
 export interface DemoEnvironment {
-  /** Known-good state published by BE1; the broker never trusts agent input for this. */
+  /** Known-good state published by the demo environment; the broker never trusts agent input for this. */
   knownGood(): Promise<KnownGoodState>;
   restoreRevision(revision: string): Promise<void>;
   restoreConfig(key: string, value: string): Promise<void>;
@@ -76,7 +76,7 @@ export class ActionBroker {
 
     const knownGood = await this.environment.knownGood();
     if (request.kind === 'restore_revision' && request.revision !== knownGood.revision) {
-      return this.record(request, dryRun, false, 'Revision is not the BE1-published known-good revision; reverting to an unverified version is not allowed.');
+      return this.record(request, dryRun, false, 'Revision is not the known-good revision published by the demo environment; reverting to an unverified version is not allowed.');
     }
     if (request.kind === 'restore_config') {
       const good = knownGood.configValues.get(request.configKey!);

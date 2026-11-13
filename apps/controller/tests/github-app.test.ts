@@ -40,7 +40,7 @@ describe('github app connect', () => {
   });
 
   it('reads installation repositories and matches a Vercel domain', () => {
-    expect(installationRepositoryNames({ repositories: [{ full_name: 'Ronit-Pai/testsite' }, { full_name: 'bad' }] })).toEqual(['Ronit-Pai/testsite']);
+    expect(installationRepositoryNames({ repositories: [{ full_name: 'iotserver24/nexathon' }, { full_name: 'bad' }] })).toEqual(['iotserver24/nexathon']);
     const projects = [{ id: 'prj_1', name: 'testsite', domains: ['testsite-three-iota.vercel.app'] }];
     expect(matchingVercelProject(projects, 'testsite-three-iota.vercel.app')).toBe('prj_1');
     expect(matchingVercelProject(projects, 'other.example')).toBeNull();
