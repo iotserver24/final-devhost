@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { Task, TaskStatus } from "@/lib/tasks";
 
 const statusClass: Record<string, string> = {
@@ -84,18 +84,49 @@ async function probeServices(): Promise<ServiceProbe[]> {
   );
 }
 
+function demoToken(): string {
+  // The token is only present in local demo deployments that explicitly set
+  // NEXT_PUBLIC_DEMO_CONTROL_TOKEN; in normal deployments controls stay off.
+  return process.env.NEXT_PUBLIC_DEMO_CONTROL_TOKEN ?? "";
+}
+
+async function demoFetch(path: string, init?: RequestInit): Promise<Response> {
+  const token = demoToken();
+  const headers = new Headers(init?.headers);
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  if (init?.body) headers.set("Content-Type", "application/json");
+  return fetch(path, { ...init, headers, cache: "no-store" });
+}
+
+async function parseJsonBody(response: Response): Promise<unknown> {
+  const text = await response.text();
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
+function errorMessage(body: unknown, fallback: string): string {
+  if (body && typeof body === "object" && !Array.isArray(body) && "error" in body) {
+    return String((body as { error: unknown }).error);
+  }
+  return fallback;
+}
+
 async function fetchTasks(): Promise<TasksState> {
   try {
     const response = await fetch("/api/tasks", { cache: "no-store" });
-    const body = await response.json().catch(() => null);
+    const body = await parseJsonBody(response);
     if (!response.ok) {
-      const message =
-        body && typeof body === "object" && "error" in body
-          ? String((body as { error: unknown }).error)
-          : `HTTP ${response.status}`;
-      return { phase: "error", status: response.status, message };
+      return {
+        phase: "error",
+        status: response.status,
+        message: errorMessage(body, `HTTP ${response.status}`)
+      };
     }
-    const tasks = Array.isArray((body as { tasks?: unknown })?.tasks)
+    const tasks = body && typeof body === "object" && Array.isArray((body as { tasks?: unknown }).tasks)
       ? ((body as { tasks: Task[] }).tasks)
       : [];
     return { phase: "ready", tasks };
@@ -113,6 +144,7 @@ export default function Home() {
   const [probes, setProbes] = useState<ServiceProbe[]>([]);
   const [faultState, setFaultState] = useState<FaultState | null>(null);
   const [pinnedByEnv, setPinnedByEnv] = useState(false);
+  const [controlsEnabled, setControlsEnabled] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [dryRun, setDryRun] = useState<DryRunReport | null>(null);
@@ -120,18 +152,35 @@ export default function Home() {
   const [newDescription, setNewDescription] = useState("");
   const [taskBusy, setTaskBusy] = useState(false);
 
+  // Monotonic sequence so an older refresh can never overwrite a newer one.
+  const refreshSeq = useRef(0);
+
   const refresh = useCallback(async () => {
+    const seq = ++refreshSeq.current;
     const [probeResults, faultResponse, tasksResult] = await Promise.all([
       probeServices(),
       fetch("/api/demo/faults", { cache: "no-store" }),
       fetchTasks()
     ]);
+    if (seq !== refreshSeq.current) return; // a newer refresh already landed
     setProbes(probeResults);
     setTasksState(tasksResult);
     if (faultResponse.ok) {
-      const body = await faultResponse.json();
-      setFaultState(body.state);
-      setPinnedByEnv(Boolean(body.pinnedByEnv));
+      const body = (await parseJsonBody(faultResponse)) as {
+        state?: FaultState;
+        pinnedByEnv?: boolean;
+        controlsEnabled?: boolean;
+      } | null;
+      if (body && body.state) {
+        setFaultState(body.state);
+        setPinnedByEnv(Boolean(body.pinnedByEnv));
+        setControlsEnabled(Boolean(body.controlsEnabled));
+      }
+    } else {
+      // Never leave the panel stuck: record the state and disable controls.
+      setFaultState(null);
+      setPinnedByEnv(false);
+      setControlsEnabled(false);
     }
   }, []);
 
@@ -147,14 +196,13 @@ export default function Home() {
     setBusy(true);
     setError(null);
     try {
-      const response = await fetch("/api/demo/faults", {
+      const response = await demoFetch("/api/demo/faults", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
       });
-      const body = await response.json();
+      const body = await parseJsonBody(response);
       if (!response.ok) {
-        setError(body.error ?? `Request failed (HTTP ${response.status})`);
+        setError(errorMessage(body, `Request failed (HTTP ${response.status})`));
       }
       await refresh();
     } catch (err) {
@@ -168,11 +216,11 @@ export default function Home() {
     setBusy(true);
     setError(null);
     try {
-      const response = await fetch("/api/demo/dry-run", { method: "POST" });
-      const body = await response.json();
+      const response = await demoFetch("/api/demo/dry-run", { method: "POST" });
+      const body = (await parseJsonBody(response)) as { report?: DryRunReport; error?: string } | null;
       if (!response.ok) {
-        setError(body.error ?? `Dry run failed (HTTP ${response.status})`);
-      } else {
+        setError(errorMessage(body, `Dry run failed (HTTP ${response.status})`));
+      } else if (body && body.report) {
         setDryRun(body.report);
       }
       await refresh();
@@ -183,24 +231,23 @@ export default function Home() {
     }
   }
 
-  // Task mutations target the REST contracts BE1 is expected to provide.
-  // Until those endpoints exist the API answers 404/405 and the UI shows it.
-  async function mutateTask(request: Request): Promise<void> {
+  // Returns true when the mutation succeeded. Form inputs are only cleared
+  // by the caller on success, so a failure preserves what the user typed.
+  async function mutateTask(request: Request): Promise<boolean> {
     setTaskBusy(true);
     setError(null);
     try {
       const response = await fetch(request);
-      const body = await response.json().catch(() => null);
+      const body = await parseJsonBody(response);
       if (!response.ok) {
-        const message =
-          body && typeof body === "object" && "error" in body
-            ? String((body as { error: unknown }).error)
-            : `HTTP ${response.status}`;
-        setError(`Task operation failed: ${message}`);
+        setError(`Task operation failed: ${errorMessage(body, `HTTP ${response.status}`)}`);
+        return false;
       }
       await refresh();
+      return true;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Task API unreachable");
+      return false;
     } finally {
       setTaskBusy(false);
     }
@@ -210,15 +257,17 @@ export default function Home() {
     event.preventDefault();
     const title = newTitle.trim();
     if (!title) return;
-    await mutateTask(
+    const ok = await mutateTask(
       new Request("/api/tasks", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title, description: newDescription.trim(), status: "Todo" })
       })
     );
-    setNewTitle("");
-    setNewDescription("");
+    if (ok) {
+      setNewTitle("");
+      setNewDescription("");
+    }
   }
 
   async function cycleStatus(task: Task) {
@@ -236,7 +285,7 @@ export default function Home() {
     await mutateTask(new Request(`/api/tasks/${task.id}`, { method: "DELETE" }));
   }
 
-  const controlsDisabled = busy || pinnedByEnv;
+  const controlsDisabled = busy || pinnedByEnv || !controlsEnabled;
   const tasks = tasksState.phase === "ready" ? tasksState.tasks : [];
   const total = tasks.length;
   const done = tasks.filter((task) => task.status === "Done").length;
@@ -327,6 +376,12 @@ export default function Home() {
         </div>
         {pinnedByEnv && (
           <p className="demo-note">DEMO_FAULT_MODE is set in the environment; demo controls are disabled until it is unset.</p>
+        )}
+        {!controlsEnabled && !pinnedByEnv && (
+          <p className="demo-note">
+            Demo controls are disabled by default. For a local demo, set DEMO_CONTROLS_ENABLED=true and
+            DEMO_CONTROL_TOKEN (and NEXT_PUBLIC_DEMO_CONTROL_TOKEN for the page) and bind the app to loopback.
+          </p>
         )}
         {busy && <p className="demo-note">Operation in progress…</p>}
         {error && <p className="demo-error" role="alert">{error}</p>}

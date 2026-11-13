@@ -6,27 +6,34 @@ import {
   setFaultMode,
   type FaultMode
 } from "@/lib/faults";
-import { demoForbiddenResponse, isDemoRequest } from "@/lib/demo-guard";
+import {
+  authorizeDemoMutation,
+  demoControlsEnabled,
+  demoDisabledResponse,
+  demoUnauthorizedResponse
+} from "@/lib/demo-guard";
 
 export const dynamic = "force-dynamic";
 
 const MODES: FaultMode[] = ["healthy", "runtime", "persistent", "dependency", "ambiguous"];
 
-export function GET(request: Request) {
-  if (!isDemoRequest(request)) return demoForbiddenResponse();
+// Read-only state endpoint: safe to expose without the control token.
+export function GET() {
   return NextResponse.json({
     ok: true,
     demo: true,
     state: getFaultState(),
     modes: MODES,
-    pinnedByEnv: isControlPinnedByEnv()
+    pinnedByEnv: isControlPinnedByEnv(),
+    controlsEnabled: demoControlsEnabled()
   });
 }
 
 export async function POST(request: Request) {
-  if (!isDemoRequest(request)) return demoForbiddenResponse();
+  if (!demoControlsEnabled()) return demoDisabledResponse();
+  if (!authorizeDemoMutation(request)) return demoUnauthorizedResponse();
 
-  let body: { action?: string; mode?: string };
+  let body: unknown = null;
   try {
     body = await request.json();
   } catch {
@@ -35,13 +42,20 @@ export async function POST(request: Request) {
       { status: 400 }
     );
   }
+  if (!body || typeof body !== "object") {
+    return NextResponse.json(
+      { ok: false, error: "Request body must be a JSON object" },
+      { status: 400 }
+    );
+  }
+  const { action, mode } = body as { action?: string; mode?: string };
 
   try {
-    if (body.action === "reset") {
+    if (action === "reset") {
       return NextResponse.json({ ok: true, demo: true, state: resetFaultMode() });
     }
-    if (body.action === "set") {
-      if (!MODES.includes(body.mode as FaultMode)) {
+    if (action === "set") {
+      if (!MODES.includes(mode as FaultMode)) {
         return NextResponse.json(
           { ok: false, error: `mode must be one of: ${MODES.join(", ")}` },
           { status: 400 }
@@ -50,7 +64,7 @@ export async function POST(request: Request) {
       return NextResponse.json({
         ok: true,
         demo: true,
-        state: setFaultMode(body.mode as FaultMode)
+        state: setFaultMode(mode as FaultMode)
       });
     }
     return NextResponse.json(
