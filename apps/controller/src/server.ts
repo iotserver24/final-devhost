@@ -85,9 +85,9 @@ function readMonitorConfig(): MonitorConfig {
   if (!Number.isInteger(deploymentStatusIntervalMs) || deploymentStatusIntervalMs < 1_000 || deploymentStatusIntervalMs > 600_000) {
     throw new Error('CONTROLLER_DEPLOYMENT_STATUS_INTERVAL_MS must be between 1000 and 600000.');
   }
-  const logsIntervalMs = Number(process.env.CONTROLLER_LOGS_INTERVAL_MS ?? 60_000);
-  if (!Number.isInteger(logsIntervalMs) || logsIntervalMs < 60_000 || logsIntervalMs > 600_000) {
-    throw new Error('CONTROLLER_LOGS_INTERVAL_MS must be between 60000 and 600000.');
+  const logsIntervalMs = Number(process.env.CONTROLLER_LOGS_INTERVAL_MS ?? 30_000);
+  if (!Number.isInteger(logsIntervalMs) || logsIntervalMs < 30_000 || logsIntervalMs > 600_000) {
+    throw new Error('CONTROLLER_LOGS_INTERVAL_MS must be between 30000 and 600000.');
   }
   const productionUrl = platform === 'vercel' ? process.env.VERCEL_PRODUCTION_DOMAIN : platform === 'railway' ? process.env.RAILWAY_PRODUCTION_URL : platform === 'render' ? process.env.RENDER_PRODUCTION_URL : process.env.COOLIFY_PRODUCTION_URL;
   if (!productionUrl) throw new Error(`Monitoring requires a ${platform} public production URL.`);
@@ -200,7 +200,7 @@ const watch = {
   probePath: monitorConfig?.probePath ?? '/api/tasks',
   rollbackEnabled: Boolean(monitorConfig?.rollbackEnabled),
   intervalMs: monitorConfig?.pollIntervalMs ?? 30_000,
-  logsIntervalMs: monitorConfig?.logsIntervalMs ?? 60_000,
+  logsIntervalMs: monitorConfig?.logsIntervalMs ?? 30_000,
   failures: 0,
   probe: null as { checkedAt: string; result: 'pass' | 'fail' | 'unknown'; evidence: string; statusCode?: number } | null,
   logs: [] as RuntimeLog[],

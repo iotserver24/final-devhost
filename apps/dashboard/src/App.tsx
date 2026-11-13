@@ -175,9 +175,9 @@ function WatchTelemetry({ watch }: { watch: WatchState | null }) {
   const logs = watch?.logs ?? [];
   const deployment = watch?.deployment ?? null;
   const probeEvery = everyLabel(watch?.intervalMs ?? 30_000);
-  const logsEvery = everyLabel(watch?.logsIntervalMs ?? 60_000);
+  const logsEvery = everyLabel(watch?.logsIntervalMs ?? 30_000);
   const nextProbe = nextIn(watch?.checkedAt, watch?.intervalMs ?? 30_000, now);
-  const nextLogs = nextIn(watch?.logsCheckedAt, watch?.logsIntervalMs ?? 60_000, now);
+  const nextLogs = nextIn(watch?.logsCheckedAt, watch?.logsIntervalMs ?? 30_000, now);
   return <section className="panel telemetry-panel" aria-live="polite">
     <div className="section-heading">
       <h2>Production telemetry</h2>
@@ -342,7 +342,7 @@ function LiveWatch({ onWatch }: { onWatch?: (watch: WatchState) => void }) {
   const checked = watch?.checkedAt ? new Date(watch.checkedAt) : null;
   const age = checked ? Math.max(0, Math.round((clock.getTime() - checked.getTime()) / 1000)) : null;
   const probeNext = nextIn(watch?.checkedAt, watch?.intervalMs ?? 30_000, clock);
-  const logsNext = nextIn(watch?.logsCheckedAt, watch?.logsIntervalMs ?? 60_000, clock);
+  const logsNext = nextIn(watch?.logsCheckedAt, watch?.logsIntervalMs ?? 30_000, clock);
   const time = clock.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
   return <div className={`live-watch ${watch?.outcome ?? 'starting'}`} aria-live="polite">
     <strong className="live-clock">{time}</strong>
