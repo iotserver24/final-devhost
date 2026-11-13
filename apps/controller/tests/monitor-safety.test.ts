@@ -175,6 +175,29 @@ describe('monitor safety boundaries', () => {
     expect(calls.rollback).toBe(0);
   });
 
+  it('retries a fix interrupted before remediation after it becomes stale', async () => {
+    let attempts = 0;
+    let clock = at;
+    const { implementation } = provider();
+    const options = makeOptions(implementation, {
+      now: () => clock,
+      actions: { remediate: async () => { attempts++; return { ok: false, message: 'Test fix ended safely.' }; } },
+    });
+    const id = incidentId(projectId, current.id, '/api/tasks');
+    await options.store.save({
+      id, projectId, kind: 'runtime_regression', status: 'detected', decision: 'fix_pr',
+      deploymentId: current.id, probePath: '/api/tasks', detectedAt: at.toISOString(),
+      evidence: ['HTTP 500'], events: [{ at: at.toISOString(), type: 'detected', message: 'Detected failure.' }],
+    });
+    await driveFailure(options);
+    expect(attempts).toBe(0);
+    clock = new Date(at.getTime() + 121_000);
+    await checkProject(options);
+    expect(attempts).toBe(1);
+    const saved = await options.store.get(id);
+    expect(saved?.events.some(item => item.type === 'remediation_started')).toBe(true);
+  });
+
   it('records unavailable remediation after rollback fails without retrying rollback', async () => {
     let rollbacks = 0;
     const { implementation } = provider({

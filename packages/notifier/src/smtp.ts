@@ -62,8 +62,13 @@ function openSocket(config: SmtpConfig): Promise<Socket | TLSSocket> {
       ? connectTls({ host: config.host, port: config.port, servername: config.host })
       : connectTcp({ host: config.host, port: config.port });
     const ready = config.secure ? 'secureConnect' : 'connect';
-    socket.once(ready, () => { socket.pause(); resolve(socket); });
-    socket.once('error', () => reject(new Error('SMTP connection failed.')));
+    const timer = setTimeout(() => {
+      socket.destroy();
+      reject(new Error('SMTP timed out.'));
+    }, config.timeoutMs);
+    socket.once(ready, () => { clearTimeout(timer); socket.pause(); resolve(socket); });
+    socket.once('error', () => { clearTimeout(timer); reject(new Error('SMTP connection failed.')); });
+    socket.once('close', () => { clearTimeout(timer); reject(new Error('SMTP connection failed.')); });
   });
 }
 

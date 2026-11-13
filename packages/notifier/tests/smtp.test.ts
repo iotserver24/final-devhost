@@ -49,6 +49,22 @@ function listen(): Promise<{ port: number; received: string[]; close: () => Prom
 }
 
 describe('smtp notifier', () => {
+  test('times out when the SMTP server never completes its TLS handshake', async () => {
+    const server = createServer(() => { /* Accept the connection but never complete TLS. */ });
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', () => resolve()));
+    const address = server.address();
+    const port = typeof address === 'object' && address ? address.port : 0;
+    try {
+      const result = await notifyIncident(incident, { smtp: {
+        host: '127.0.0.1', port, secure: true, from: 'a@example.com', to: 'b@example.com', timeoutMs: 100,
+      } });
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.reason).toBe('timeout');
+    } finally {
+      await new Promise<void>(resolve => server.close(() => resolve()));
+    }
+  });
+
   test('sends the incident report to a local SMTP server', async () => {
     const server = await listen();
     const smtp: SmtpConfig = {

@@ -594,10 +594,13 @@ export async function checkProject(options: MonitorOptions): Promise<MonitorResu
     }
     const fixAttempts = existing.events.filter(item => item.type === 'remediation_started').length;
     const heldForReview = [...existing.events].reverse().find(item => item.type === 'awaiting_comment' || item.type === 'review_resumed' || item.type === 'draft_pr')?.type === 'awaiting_comment';
-    const fixStoppedEarly = ['needs_human', 'remediation_failed'].includes(existing.status) && fixAttempts < 10
+    const interruptedBeforeFix = existing.status === 'detected' && existing.decision === 'fix_pr'
+      && now().getTime() - lastActivity > 2 * 60_000;
+    const fixStoppedEarly = (['needs_human', 'remediation_failed'].includes(existing.status) || interruptedBeforeFix) && fixAttempts < 10
       && !existing.events.some(item => item.type === 'draft_pr')
       && !heldForReview;
     if (fixStoppedEarly && options.actions?.remediate) {
+      existing.status = 'remediating';
       existing.events.push(event(now().toISOString(), 'remediation_retry', 'Retrying the fix. The previous attempt stopped before a pull request.'));
       await options.store.save(existing);
       await finishRemediation(existing, options);
