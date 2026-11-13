@@ -425,7 +425,7 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
       </div>
     </header>
     {section === 'watch' && <><FailureStreak watch={watch} /><main className="detail"><Overview watch={watch} /></main></>}
-    {(section === 'fleet' || section === 'sites') && <Fleet incidents={snapshot.incidents} />}
+    {section === 'fleet' && <Fleet incidents={snapshot.incidents} />}
     {section === 'setup' && <Setup onClose={() => undefined} />}
     {section === 'incident' && <main className="detail-wrap">{selected ? <Detail incident={selected} watch={watch} /> : <p className="state-message">{snapshot.loading ? 'Loading this incident…' : 'That incident was not found.'} <Link href="/">Back to incidents</Link></p>}</main>}
     {section === 'incidents' && <main className="desk">
