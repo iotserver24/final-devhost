@@ -662,6 +662,28 @@ async function integrationRoutes(request: Request, settingsStore: typeof store):
       return Response.json({ error: 'Vercel did not list projects.' }, { status: 502 });
     }
   }
+  if (url.pathname === '/api/vercel/deployments' && request.method === 'GET') {
+    const token = process.env.VERCEL_ACCESS_TOKEN;
+    const projectId = url.searchParams.get('projectId') || process.env.VERCEL_PROJECT_ID || '';
+    if (!token || !projectId) return Response.json({ deployments: [], error: 'Connect Vercel and choose a project first.' }, { status: 400 });
+    const api = new URL('https://api.vercel.com/v6/deployments');
+    api.searchParams.set('projectId', projectId);
+    api.searchParams.set('limit', '15');
+    const teamId = process.env.VERCEL_TEAM_ID;
+    if (teamId) api.searchParams.set('teamId', teamId);
+    const response = await fetch(api, { headers: { Authorization: `Bearer ${token}` } });
+    if (!response.ok) return Response.json({ deployments: [], error: 'Vercel did not list deployments.' }, { status: 502 });
+    const body = await response.json() as { deployments?: { uid?: string; url?: string; state?: string; created?: number; meta?: { githubCommitRef?: string; githubCommitSha?: string } }[] };
+    const deployments = (body.deployments ?? []).flatMap(item => item.uid ? [{
+      id: item.uid,
+      url: item.url ?? '',
+      state: item.state ?? 'UNKNOWN',
+      createdAt: item.created ? new Date(item.created).toISOString() : '',
+      ref: item.meta?.githubCommitRef ?? '',
+      sha: item.meta?.githubCommitSha?.slice(0, 7) ?? '',
+    }] : []);
+    return Response.json({ deployments, selected: process.env.CONTROLLER_WATCH_DEPLOYMENT_ID ?? '' });
+  }
   if (url.pathname === '/api/disconnect' && request.method === 'POST') {
     let body: unknown;
     try { body = await request.json(); } catch { return Response.json({ error: 'Expected JSON.' }, { status: 400 }); }

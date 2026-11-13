@@ -26,6 +26,7 @@ export function requiredRole(method: string, pathname: string): DashboardRole | 
   // Reading configuration exposes integration names but never secrets; admins.
   if (pathname === '/api/settings' && upper === 'GET') return 'admin';
   if (pathname === '/api/watched-services') return 'admin';
+  if (pathname === '/api/vercel/deployments') return 'admin';
 
   // Actions and monitoring control: operators.
   if (pathname.startsWith('/api/actions/')) return 'operator';

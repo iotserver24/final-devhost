@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import Link from 'next/link';
+import { useParams, usePathname } from 'next/navigation';
 import { Setup } from './Setup';
 import {
   decisionLabels,
@@ -89,9 +91,9 @@ function decisionSummary(incident: Incident) {
   return incident.decision ? decisionLabels[incident.decision] : 'Pending';
 }
 
-function IncidentCard({ incident, selected, onSelect }: { incident: Incident; selected: boolean; onSelect: () => void }) {
-  return (
-    <button className={`incident-card${selected ? ' selected' : ''}`} onClick={onSelect} type="button">
+function IncidentCard({ incident, selected, onSelect, href }: { incident: Incident; selected: boolean; onSelect: () => void; href?: string }) {
+  const className = `incident-card${selected ? ' selected' : ''}`;
+  const body = <>
       <span className="card-topline"><span>{formatDate(incident.detectedAt)}</span><StatusPill status={incident.status} /></span>
       <strong>{kindLabels[incident.kind]}</strong>
       <span className="card-meta">
@@ -102,8 +104,9 @@ function IncidentCard({ incident, selected, onSelect }: { incident: Incident; se
         {incident.evidenceSources?.map(source => <span className="tag" key={source}>{source}</span>)}
       </span>}
       <span className="card-summary">{incidentHeadline(incident)}</span>
-    </button>
-  );
+    </>;
+  if (href) return <Link className={className} href={href}>{body}</Link>;
+  return <button className={className} onClick={onSelect} type="button">{body}</button>;
 }
 
 function Timeline({ events }: { events: Incident['events'] }) {
@@ -246,7 +249,7 @@ function Detail({ incident, watch }: { incident: Incident; watch: WatchState | n
   const decision = incident.events.find(event => event.type === 'decision');
   return <main className="detail">
     <div className="detail-heading">
-      <div><p className="eyebrow">Incident {incident.id}</p><h1>{kindLabels[incident.kind]}</h1><p className="muted">Detected {formatDate(incident.detectedAt)} · {incident.projectId}</p></div>
+      <div><p className="eyebrow">Incident {incident.id}</p><h1>{incident.cause ? incident.cause.replaceAll('_', ' ') : kindLabels[incident.kind]}</h1><p className="muted">Detected {formatDate(incident.detectedAt)} · {incident.projectId}</p><Link href="/">All incidents</Link></div>
       <StatusPill status={incident.status} />
     </div>
     <section className="trigger" aria-label="What triggered this incident">
@@ -383,35 +386,54 @@ function FailureStreak({ watch }: { watch: WatchState | null }) {
 }
 
 function Dashboard({ onLogout }: { onLogout: () => void }) {
+  const pathname = usePathname();
+  const params = useParams<{ id?: string }>();
   const [watch, setWatch] = useState<WatchState | null>(null);
-  const [showSetup, setShowSetup] = useState(false);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [refresh, setRefresh] = useState(0);
   const [targetFilter, setTargetFilter] = useState('all');
+  const selectedId = typeof params?.id === 'string' ? params.id : null;
   const snapshot = useIncidents(mode, selectedId, refresh);
-  const selected = snapshot.detail ?? snapshot.incidents[0] ?? null;
+  const selected = snapshot.detail ?? snapshot.incidents.find(item => item.id === selectedId) ?? null;
   const targets = useMemo(() => [...new Set(snapshot.incidents.map(item => item.targetId).filter((value): value is string => Boolean(value)))], [snapshot.incidents]);
   const visible = useMemo(() => targetFilter === 'all' ? snapshot.incidents : snapshot.incidents.filter(item => item.targetId === targetFilter), [snapshot.incidents, targetFilter]);
   const counts = useMemo(() => ({ active: visible.filter(item => !['recovered', 'needs_human', 'remediation_failed', 'pr_opened'].includes(item.status)).length, recovered: visible.filter(item => item.status === 'recovered').length }), [visible]);
+  const section = pathname.startsWith('/setup') ? 'setup' : pathname.startsWith('/watch') ? 'watch' : pathname.startsWith('/incidents/') ? 'incident' : 'incidents';
 
   return <div className="app-shell">
-    <header className="topbar"><div className="brand"><img className="brand-logo" src="/logo.png" alt="Sentinel logo" /><span>Sentinel <em>deploy watch</em></span></div><div className="topbar-meta"><LiveWatch onWatch={setWatch} /><span className={`mode-dot ${mode}`} />{mode === 'fixtures' ? 'Rehearsal data' : 'Live controller'}<button className="refresh" onClick={() => setShowSetup(value => !value)} type="button">Setup</button><button className="refresh" onClick={() => setRefresh(value => value + 1)} type="button">Refresh</button><button className="refresh" onClick={onLogout} type="button">Log out</button></div></header>
-    <FailureStreak watch={watch} />
-    <div className="workspace">
-      <aside className="sidebar"><div className="sidebar-heading"><div><p className="eyebrow">Operations</p><h2>Incidents</h2></div><span className="count">{visible.length}</span></div><div className="sidebar-stats"><span><strong>{counts.active}</strong> active</span><span><strong>{counts.recovered}</strong> recovered</span></div>
-        {targets.length > 1 && <label className="target-filter">Target
+    <header className="topbar">
+      <div className="brand"><img className="brand-logo" src="/logo.png" alt="" /><span>Sentinel</span></div>
+      <nav className="desk-nav" aria-label="Desk">
+        <Link className={section === 'incidents' || section === 'incident' ? 'active' : ''} href="/">Incidents</Link>
+        <Link className={section === 'watch' ? 'active' : ''} href="/watch">Watch</Link>
+        <Link className={section === 'setup' ? 'active' : ''} href="/setup">Setup</Link>
+      </nav>
+      <div className="topbar-meta">
+        <LiveWatch onWatch={setWatch} />
+        <span className={`mode-dot ${mode}`} />
+        {mode === 'fixtures' ? 'Rehearsal' : 'Live'}
+        <button className="refresh" onClick={() => setRefresh(value => value + 1)} type="button">Refresh</button>
+        <button className="refresh" onClick={onLogout} type="button">Log out</button>
+      </div>
+    </header>
+    {section === 'watch' && <><FailureStreak watch={watch} /><main className="detail"><Overview watch={watch} /></main></>}
+    {section === 'setup' && <Setup onClose={() => undefined} />}
+    {section === 'incident' && <main className="detail-wrap">{selected ? <Detail incident={selected} watch={watch} /> : <p className="state-message">{snapshot.loading ? 'Loading this incident…' : 'That incident was not found.'} <Link href="/">Back to incidents</Link></p>}</main>}
+    {section === 'incidents' && <div className="workspace workspace-single">
+      <aside className="sidebar sidebar-wide">
+        <div className="sidebar-heading"><div><p className="eyebrow">What broke</p><h2>Incidents</h2></div><span className="count">{visible.length}</span></div>
+        <div className="sidebar-stats"><span><strong>{counts.active}</strong> still open</span><span><strong>{counts.recovered}</strong> recovered</span></div>
+        {targets.length > 1 && <label className="target-filter">Service
           <select value={targetFilter} onChange={event => setTargetFilter(event.target.value)}>
-            <option value="all">All targets</option>
+            <option value="all">All services</option>
             {targets.map(target => <option key={target} value={target}>{target}</option>)}
           </select>
         </label>}
-        {snapshot.loading && <p className="state-message">Loading incident evidence…</p>}
+        {snapshot.loading && <p className="state-message">Loading incidents…</p>}
         {snapshot.error && <div className="error-box" role="alert"><strong>Controller unavailable</strong><p>{snapshot.error}</p><button onClick={() => setRefresh(value => value + 1)} type="button">Try again</button></div>}
-        {!snapshot.loading && !snapshot.error && visible.length === 0 && <p className="state-message">No incidents recorded yet.</p>}
-        <nav className="incident-list" aria-label="Incidents">{visible.map(incident => <IncidentCard key={incident.id} incident={incident} selected={selected?.id === incident.id} onSelect={() => setSelectedId(incident.id)} />)}</nav>
+        {!snapshot.loading && !snapshot.error && visible.length === 0 && <p className="state-message">Nothing is open. Watch stays on the Watch page.</p>}
+        <nav className="incident-list" aria-label="Incidents">{visible.map(incident => <IncidentCard key={incident.id} incident={incident} selected={false} onSelect={() => undefined} href={`/incidents/${incident.id}`} />)}</nav>
       </aside>
-      {showSetup ? <Setup onClose={() => setShowSetup(false)} /> : selected ? <Detail incident={selected} watch={watch} /> : <Overview watch={watch} />}
-    </div>
+    </div>}
   </div>;
 }
 

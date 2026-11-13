@@ -436,6 +436,12 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .brand { gap: 12px; font-size: 16px; letter-spacing: -.035em; }
 .brand em { color: var(--accent); font-size: 10px; font-weight: 600; letter-spacing: .09em; text-transform: uppercase; }
 .brand-logo { width: 30px; height: 30px; border: 1px solid #3a8f8d; border-radius: 8px; filter: none; opacity: 1; }
+.desk-nav { display: flex; gap: 6px; }
+.desk-nav a { color: var(--muted); text-decoration: none; padding: 6px 10px; border-radius: 999px; }
+.desk-nav a.active { color: var(--text); background: rgba(255,255,255,.08); }
+.workspace-single { grid-template-columns: 1fr; }
+.sidebar-wide { max-width: 860px; }
+.incident-card { text-decoration: none; color: inherit; display: block; }
 .topbar-meta { gap: 10px; color: var(--muted); }
 .live-watch { padding: 7px 10px; border-color: var(--line); border-radius: 7px; background: #0d1b26; }
 .live-clock { color: var(--accent); font-weight: 700; }
@@ -621,6 +627,10 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .status-pr_opened { border-color: #42659a; background: #131c2b; color: var(--info); }
 .trigger { border-color: #2e2e2e; background: #101010; }
 .trigger h2 { color: #f0f0f0; }
+.workspace.workspace-single { display: block; min-height: 0; }
+.workspace.workspace-single .sidebar,
+.sidebar.sidebar-wide { max-width: none; width: 100%; max-height: none; padding: 28px 32px 48px; border-right: 0; }
+.workspace.workspace-single .incident-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; }
 .trigger p, .trigger ul { color: #a6a6a6; }
 .signal-grid { background: #0b0b0b; }
 .signal-grid span { color: #8f8f8f; }

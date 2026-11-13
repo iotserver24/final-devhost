@@ -29,6 +29,7 @@ export function Setup({ onClose }: { onClose: () => void }) {
   const [repos, setRepos] = useState<string[]>([]);
   const [repoQuery, setRepoQuery] = useState('');
   const [projects, setProjects] = useState<{ id: string; name: string; domains: string[]; teamId?: string }[]>([]);
+  const [deployments, setDeployments] = useState<{ id: string; url: string; state: string; createdAt: string; ref: string; sha: string }[]>([]);
   const [monitorNote, setMonitorNote] = useState('');
   const [githubListNote, setGithubListNote] = useState('Repository list has not loaded.');
   const [vercelListNote, setVercelListNote] = useState('Project list has not loaded.');
@@ -106,6 +107,19 @@ export function Setup({ onClose }: { onClose: () => void }) {
       .catch(() => { if (!abort.signal.aborted) setVercelListNote('Project list did not load.'); });
     return () => abort.abort();
   }, [fields.length, vercelReady]);
+
+  useEffect(() => {
+    const projectId = draft.VERCEL_PROJECT_ID;
+    if (!projectId || !vercelReady) { setDeployments([]); return; }
+    const abort = new AbortController();
+    void fetch(`/api/vercel/deployments?projectId=${encodeURIComponent(projectId)}`, { headers: { Accept: 'application/json' }, signal: abort.signal })
+      .then(async response => {
+        const body = await response.json().catch(() => ({})) as { deployments?: { id: string; url: string; state: string; createdAt: string; ref: string; sha: string }[] };
+        if (!abort.signal.aborted) setDeployments(body.deployments ?? []);
+      })
+      .catch(() => { if (!abort.signal.aborted) setDeployments([]); });
+    return () => abort.abort();
+  }, [draft.VERCEL_PROJECT_ID, vercelReady]);
   const groups = [...new Set(fields.map(item => item.group).filter(group => group !== 'Vercel'))];
   const setValue = (key: string, value: string) => setDraft(current => ({ ...current, [key]: value }));
 
@@ -211,10 +225,10 @@ export function Setup({ onClose }: { onClose: () => void }) {
     <div className="setup-header">
       <div>
         <p className="eyebrow">Control room / configuration</p>
-        <h1>Connect your stack</h1>
-        <p className="setup-lede">Give Sentinel the smallest set of credentials it needs to watch one Vercel project and report evidence here.</p>
+        <h1>Setup</h1>
+        <p className="setup-lede">Pick the repository, the Vercel project, and the deployment Sentinel should watch.</p>
       </div>
-      <button className="button button-ghost" type="button" onClick={onClose}>Back to incidents</button>
+      <a className="button button-ghost" href="/">Incidents</a>
     </div>
 
     <section className="setup-hero" aria-labelledby="services-title">
@@ -298,6 +312,13 @@ export function Setup({ onClose }: { onClose: () => void }) {
           }}>
             <option value="">Choose a project</option>
             {projects.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}
+          </select>
+        </label>
+        <label className="setup-field">
+          <span>Deployment for this project</span>
+          <select value={deployments.some(item => item.id === draft.CONTROLLER_WATCH_DEPLOYMENT_ID) ? draft.CONTROLLER_WATCH_DEPLOYMENT_ID : ''} onChange={event => { void choose('CONTROLLER_WATCH_DEPLOYMENT_ID', event.target.value); }}>
+            <option value="">{deployments.length ? 'Choose a deployment' : 'No deployments loaded'}</option>
+            {deployments.map(item => <option key={item.id} value={item.id}>{item.state} · {item.ref || 'no branch'} · {item.sha || item.id.slice(0, 8)} · {item.url}</option>)}
           </select>
         </label>
         <div className="field-grid field-grid-2">

@@ -16,6 +16,7 @@ export const settingFields: SettingField[] = [
   { group: 'Vercel', key: 'VERCEL_REFRESH_TOKEN', label: 'Refresh token', secret: true },
   { group: 'Vercel', key: 'VERCEL_TEAM_ID', label: 'Team id', secret: false, hidden: true, clientOwned: true },
   { group: 'Vercel', key: 'VERCEL_PROJECT_ID', label: 'Project id', secret: false, clientOwned: true },
+  { group: 'Vercel', key: 'CONTROLLER_WATCH_DEPLOYMENT_ID', label: 'Watched deployment', secret: false, hidden: true, clientOwned: true },
   { group: 'Vercel', key: 'CONTROLLER_ROLLBACK_PROJECT_ID', label: 'Rollback project id', secret: false, hidden: true, clientOwned: true },
   { group: 'Vercel', key: 'VERCEL_PRODUCTION_DOMAIN', label: 'Public site link (host only)', secret: false, clientOwned: true },
   { group: 'Vercel', key: 'CONTROLLER_PROBE_PATH', label: 'Probe path', secret: false, clientOwned: true },
