@@ -410,6 +410,15 @@ function FailureStreak({ watch }: { watch: WatchState | null }) {
   </section>;
 }
 
+function useTheme() {
+  const [theme, setTheme] = useState<'night' | 'day'>(() => (typeof window !== 'undefined' && window.localStorage.getItem('sentinel-theme') === 'day' ? 'day' : 'night'));
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    window.localStorage.setItem('sentinel-theme', theme);
+  }, [theme]);
+  return { theme, toggle: () => setTheme(value => (value === 'night' ? 'day' : 'night')) };
+}
+
 function Dashboard({ onLogout }: { onLogout: () => void }) {
   const pathname = usePathname();
   const params = useParams<{ id?: string }>();
@@ -417,6 +426,7 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
   const [refresh, setRefresh] = useState(0);
   const [targetFilter, setTargetFilter] = useState('all');
   const selectedId = typeof params?.id === 'string' ? params.id : null;
+  const { theme, toggle } = useTheme();
   const snapshot = useIncidents(mode, selectedId, refresh);
   const selected = snapshot.detail ?? snapshot.incidents.find(item => item.id === selectedId) ?? null;
   const targets = useMemo(() => [...new Set(snapshot.incidents.map(item => item.targetId).filter((value): value is string => Boolean(value)))], [snapshot.incidents]);
@@ -438,6 +448,7 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
         <span className={`mode-dot ${mode}`} />
         {mode === 'fixtures' ? 'Rehearsal' : 'Live'}
         <button className="refresh" onClick={() => setRefresh(value => value + 1)} type="button">Refresh</button>
+        <button className="refresh theme-toggle" onClick={toggle} type="button" aria-label={theme === 'night' ? 'Switch to day mode' : 'Switch to night mode'}>{theme === 'night' ? 'Day' : 'Night'}</button>
         <button className="refresh" onClick={onLogout} type="button">Log out</button>
       </div>
     </header>
