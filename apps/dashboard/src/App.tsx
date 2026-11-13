@@ -254,9 +254,8 @@ function WatchTelemetry({ watch }: { watch: WatchState | null }) {
 function Overview({ watch }: { watch: WatchState | null }) {
   return <main className="detail overview">
     <div className="overview-hero">
-      <span className="empty-icon" aria-hidden="true">K</span>
-      <h1>No incident selected</h1>
-      <p>Production is quiet. The latest probe and the current production deployment&apos;s Vercel runtime logs stay visible below; when the controller records an incident, its evidence and recovery path open here.</p>
+      <h1>Production watch</h1>
+      <p>Follow the latest health checks and deployment logs. Open an incident from the incident list to investigate its evidence and recovery.</p>
     </div>
     <WatchTelemetry watch={watch} />
   </main>;
@@ -452,7 +451,7 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
         <button className="refresh" onClick={onLogout} type="button">Log out</button>
       </div>
     </header>
-    {section === 'watch' && <><FailureStreak watch={watch} /><main className="detail"><Overview watch={watch} /></main></>}
+    {section === 'watch' && <><FailureStreak watch={watch} /><Overview watch={watch} /></>}
     {section === 'fleet' && <Fleet incidents={snapshot.incidents} />}
     {section === 'setup' && <Setup onClose={() => undefined} />}
     {section === 'incident' && <main className="detail-wrap">{selected ? <Detail incident={selected} watch={watch} /> : <p className="state-message">{snapshot.loading ? 'Loading this incident…' : 'That incident was not found.'} <Link href="/">Back to incidents</Link></p>}</main>}

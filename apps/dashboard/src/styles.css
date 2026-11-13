@@ -308,7 +308,6 @@ h1, h2, strong { font-family: 'IBM Plex Sans', sans-serif; }
 .error-box button { border-color: var(--danger); background: transparent; color: var(--danger); }
 
 .detail { position: relative; width: 100%; max-width: 1420px; overflow-y: auto; padding: 36px clamp(22px, 4vw, 58px) 48px; }
-.detail::before { position: absolute; top: 6px; right: clamp(22px, 4vw, 58px); z-index: 0; color: var(--surface-raised); font-family: 'Space Grotesk', sans-serif; font-size: clamp(90px, 14vw, 190px); font-weight: 700; letter-spacing: -.06em; line-height: 1; text-transform: uppercase; content: 'Sentinel'; pointer-events: none; }
 .detail > * { position: relative; z-index: 1; }
 .detail-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
 .detail-heading h1, .setup-header h1 { margin: 0 0 8px; color: var(--text); font-family: 'Space Grotesk', sans-serif; font-size: clamp(34px, 4.5vw, 56px); font-weight: 700; letter-spacing: -.05em; line-height: 1.02; text-transform: uppercase; }
@@ -882,4 +881,35 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   .transcript-run-picker label { max-width: none; }
   .transcript-toolbar { align-items: stretch; flex-direction: column; }
   .transcript-download { align-self: flex-start; }
+}
+
+.overview { margin: 0 auto; max-width: 1200px; }
+.overview-hero { margin-bottom: 28px; }
+.overview-hero h1 { margin: 0 0 12px; color: var(--text); font-family: 'Space Grotesk', sans-serif; font-size: clamp(28px, 4vw, 40px); letter-spacing: -.03em; line-height: 1.15; }
+.overview-hero p { max-width: 68ch; margin: 0; color: var(--muted); font-size: 14px; line-height: 1.65; }
+.telemetry-panel { margin-top: 20px; }
+.telemetry-panel .section-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.telemetry-probe { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; padding: 18px 0 24px; }
+.telemetry-probe > div { display: grid; align-content: start; min-width: 0; gap: 8px; }
+.telemetry-label { color: var(--muted); font-size: 12px; }
+.telemetry-probe strong { color: var(--text); font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.telemetry-probe .pass { color: var(--success); }
+.telemetry-probe .fail { color: var(--danger); }
+.telemetry-probe .unknown { color: var(--muted); }
+.log-heading { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 10px; padding-top: 20px; border-top: 1px solid var(--line); }
+.log-heading strong { display: flex; flex-wrap: wrap; gap: 8px; color: var(--text); font-size: 13px; }
+.log-heading > span, .log-deployment { color: var(--muted); font-size: 11px; }
+.telemetry-error, .probe-error { margin: 16px 0 0; padding: 12px 14px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface-raised); color: var(--warning); font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+.telemetry-empty, .log-fallback-note { margin: 14px 0 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
+.runtime-logs { display: grid; gap: 0; max-height: 400px; overflow: auto; margin: 16px 0 0; padding: 0; list-style: none; scrollbar-width: thin; scrollbar-color: var(--line-strong) var(--surface); }
+.runtime-logs li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 12px; padding: 12px 0; border-top: 1px solid var(--line); color: var(--muted); font: 12px/1.6 ui-monospace, monospace; }
+.runtime-logs time { font-variant-numeric: tabular-nums; }
+.runtime-log-level { text-transform: uppercase; }
+.runtime-logs p { flex: 1 1 100%; min-width: 0; margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.runtime-log-error { color: var(--danger) !important; }
+.crash-highlight { margin-top: 16px; padding: 14px; border: 1px solid var(--danger); border-radius: 8px; background: var(--danger-bg); color: var(--danger); font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+.crash-highlight ul { margin: 8px 0 0; padding-left: 18px; }
+@media (max-width: 600px) {
+  .telemetry-probe { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px 16px; }
+  .overview { padding: 28px 20px 40px; }
 }
