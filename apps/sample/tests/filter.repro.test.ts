@@ -10,6 +10,8 @@ test('filtering tasks by status returns only matching tasks', async () => {
   expect(body.tasks.map((task: { status: string }) => task.status)).toEqual(['Done']);
 });
 
-test('the crash route throws when the task is missing', () => {
-  expect(() => crash()).toThrow('Task service failed while reading a task.');
+test('the crash route returns a successful response when the task is missing', async () => {
+  const response = await crash();
+  expect(response.status).toBe(200);
+  expect(await response.json()).toEqual({ ok: true, status: 'Todo' });
 });
