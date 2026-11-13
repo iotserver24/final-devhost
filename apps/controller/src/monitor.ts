@@ -177,7 +177,7 @@ async function saveAndNotify(
   await options.store.save(incident);
 }
 
-async function finishRemediation(
+export async function finishRemediation(
   incident: Incident,
   options: MonitorOptions,
 ): Promise<void> {

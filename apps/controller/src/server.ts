@@ -12,6 +12,7 @@ import { CoolifyProvider, RailwayProvider, RenderProvider } from './platform-pro
 import { checkProject, runtimeLogSignal, type DeploymentProvider, type DeploymentSummary, type RuntimeLog } from './monitor';
 import { createControllerActions, type RemediationConfig } from './actions';
 import { applyStoredSettings, createSettingsApi } from './settings';
+import { finishRemediation } from './monitor';
 import { startLocalEngine, type LocalEngine } from './local-engine';
 import { policyFromEnvironment } from './classify';
 import { posthogFromEnvironment } from './posthog';
@@ -397,7 +398,7 @@ function launchMonitor(config: MonitorConfig): void {
             const fresh = await store.saveRuntimeLogs(config.projectId, current.id, logs);
             watch.deployment = { id: current.id, url: current.immutableUrl, createdAt: current.createdAt };
             watch.logsSource = 'runtime-logs';
-            watch.logs = logs.slice(-50);
+            watch.logs = logs.slice(-200);
             await observeRuntime(current.id, logs, fresh);
           }
         }
@@ -472,6 +473,7 @@ function startLocalDemoMonitor(): void {
   localEngine = startLocalEngine({
     demoBaseUrl: base,
     store,
+    remediate: incident => actions.remediate ? actions.remediate(incident) : Promise.resolve({ ok: false, message: 'Remediation is not configured.' }),
     pollIntervalMs: Number(process.env.CONTROLLER_DEMO_POLL_INTERVAL_MS ?? 5_000),
     detectionThreshold: Number(process.env.CONTROLLER_DEMO_DETECTION_THRESHOLD ?? 1),
   });
@@ -757,6 +759,21 @@ if (!process.env.NEXATHON_RUN_TOKEN) {
 
 if (monitorConfig) launchMonitor(monitorConfig);
 startLocalDemoMonitor();
+
+void (async () => {
+  if (!actions.remediate) return;
+  const open = await store.list(100);
+  for (const incident of open) {
+    if (incident.status !== 'needs_human') continue;
+    if (incident.events.some(item => item.type === 'remediation_started' || item.type === 'draft_pr')) continue;
+    incident.events.push({
+      at: new Date().toISOString(),
+      type: 'remediation_retry',
+      message: 'This incident was waiting for a person. Starting a sandbox fix and pull request anyway.',
+    });
+    await finishRemediation(incident, { store, actions } as Parameters<typeof finishRemediation>[1]);
+  }
+})();
 
 let shuttingDown = false;
 async function shutdown() {

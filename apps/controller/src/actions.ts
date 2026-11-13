@@ -22,7 +22,25 @@ export interface ControllerActionsConfig {
   settings?: Pick<IncidentStore, 'readSettings'>;
 }
 
+async function latestCommitSha(repository: string, token: string): Promise<string | undefined> {
+  const response = await fetch(`https://api.github.com/repos/${repository}/commits/HEAD`, {
+    headers: { Accept: 'application/vnd.github+json', Authorization: `Bearer ${token}`, 'User-Agent': 'sentinel' },
+  });
+  if (!response.ok) return undefined;
+  const body = await response.json() as { sha?: unknown };
+  return typeof body.sha === 'string' && /^[0-9a-f]{40}$/.test(body.sha) ? body.sha : undefined;
+}
+
 async function runRemediation(incident: Incident, config: RemediationConfig, hub?: ActivityHub, settings?: Pick<IncidentStore, 'readSettings'>): Promise<RemediationOutcome> {
+  if (!incident.commitSha && settings) {
+    try {
+      const credentials = await githubCredentials(settings);
+      const token = credentials.read ?? credentials.write;
+      if (token) incident.commitSha = await latestCommitSha(config.repository, token);
+    } catch {
+      // The normal credential check below reports a token failure.
+    }
+  }
   if (!incident.commitSha) return { ok: false, message: 'Incident has no commit SHA; remediation was not started.' };
 
   let reproductionFixture: RemediationRequest['reproductionFixture'];

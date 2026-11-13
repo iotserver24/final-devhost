@@ -22,6 +22,8 @@ import { LocalDemoAdapter, serviceName } from './local-adapter';
 export interface LocalEngineOptions {
   demoBaseUrl: string;
   store: Pick<IncidentStore, 'get' | 'save'>;
+  /** Conflicting evidence still starts a sandbox fix. Service restarts stay blocked. */
+  remediate?: (incident: Incident) => Promise<{ ok: boolean; message: string; actionUrl?: string; evidence?: string[] }>;
   pollIntervalMs?: number;
   /** Demo profile detects faster than the cloud monitor's three-failure rule. */
   detectionThreshold?: number;
@@ -34,6 +36,39 @@ export interface LocalEngine {
   stop(): Promise<void>;
   broker: ActionBroker;
   adapter: LocalDemoAdapter;
+}
+
+async function dispatchRepositoryFix(incident: Incident, options: LocalEngineOptions, at: string): Promise<void> {
+  if (!options.remediate) {
+    incident.status = 'needs_human';
+    if (incident.escalation) incident.escalation.recommendedNextStep = 'Repository fix is not configured on this controller, so no sandbox was started.';
+    await options.store.save(incident);
+    return;
+  }
+  if (incident.events.some(item => item.type === 'remediation_started')) {
+    await options.store.save(incident);
+    return;
+  }
+  incident.status = 'remediating';
+  incident.decision = 'fix_pr';
+  incident.events.push({ at, type: 'remediation_started', message: 'Starting a sandbox to reproduce the failure and open a fix pull request.' });
+  await options.store.save(incident);
+  try {
+    const result = await options.remediate(incident);
+    if (result.ok) {
+      incident.status = 'pr_opened';
+      if (result.actionUrl) incident.actionUrl = result.actionUrl;
+      incident.events.push({ at: new Date().toISOString(), type: 'draft_pr', message: result.message });
+    } else {
+      incident.status = 'remediation_failed';
+      incident.events.push({ at: new Date().toISOString(), type: 'remediation_failed', message: result.message });
+    }
+    if (result.evidence?.length) incident.evidence.push(...result.evidence.map(item => evidenceLine(item)));
+  } catch {
+    incident.status = 'remediation_failed';
+    incident.events.push({ at: new Date().toISOString(), type: 'remediation_failed', message: 'The sandbox fix failed before a pull request was opened.' });
+  }
+  await options.store.save(incident);
 }
 
 const projectId = 'taskflow-demo';
@@ -230,7 +265,8 @@ export function startLocalEngine(options: LocalEngineOptions): LocalEngine {
       events: [],
       timing: {},
     };
-    if (existing && ['recovered', 'needs_human'].includes(existing.status)) return;
+    const fixAlreadyStarted = existing?.events.some(item => item.type === 'remediation_started' || item.type === 'draft_pr');
+    if (existing && (existing.status === 'recovered' || existing.status === 'pr_opened' || (existing.status === 'needs_human' && fixAlreadyStarted))) return;
 
     // Evidence: observations only from here; the diagnosis string is an inference and marked as one.
     const at = now().toISOString();
@@ -251,17 +287,16 @@ export function startLocalEngine(options: LocalEngineOptions): LocalEngine {
     if (fault.faultInjectedAt) incident.timing = { ...incident.timing, faultInjectedAt: fault.faultInjectedAt };
 
     if (diagnosis.ambiguous) {
-      incident.status = 'needs_human';
-      incident.decision = 'escalate';
+      incident.decision = 'fix_pr';
       incident.escalation = {
         reason: diagnosis.ambiguous,
         at,
-        recommendedNextStep: 'Inspect the affected services manually; no automated action was taken.',
+        recommendedNextStep: 'Evidence conflicts, so no service was restarted. A sandbox is checking the repository and opening a fix pull request.',
         notificationOutcome: 'not_attempted',
       };
       incident.timing = { ...incident.timing, decidedAt: at };
       incident.events.push({ at, type: 'escalated', message: evidenceLine(diagnosis.ambiguous) });
-      await options.store.save(incident);
+      await dispatchRepositoryFix(incident, options, at);
       return;
     }
 
@@ -292,7 +327,7 @@ export function startLocalEngine(options: LocalEngineOptions): LocalEngine {
         notificationOutcome: 'not_attempted',
       };
       incident.events.push({ at: now().toISOString(), type: 'escalated', message: evidenceLine(`Action denied: ${decision.reason}`) });
-      await options.store.save(incident);
+      await dispatchRepositoryFix(incident, options, now().toISOString());
       return;
     }
 
@@ -315,7 +350,7 @@ export function startLocalEngine(options: LocalEngineOptions): LocalEngine {
         notificationOutcome: 'not_attempted',
       };
       incident.events.push({ at: now().toISOString(), type: 'escalated', message: evidenceLine(executed.reason) });
-      await options.store.save(incident);
+      await dispatchRepositoryFix(incident, options, now().toISOString());
       return;
     }
 
@@ -338,6 +373,8 @@ export function startLocalEngine(options: LocalEngineOptions): LocalEngine {
         notificationOutcome: 'not_attempted',
       };
       incident.events.push({ at: verifiedAt, type: 'escalated', message: 'Verification failed after the action; escalating to a human.' });
+      await dispatchRepositoryFix(incident, options, verifiedAt);
+      return;
     }
     await options.store.save(incident);
   };

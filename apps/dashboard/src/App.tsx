@@ -152,6 +152,10 @@ function LiveActivity({ incidentId }: { incidentId: string }) {
   </section>;
 }
 
+function crashLine(log: { level: string; message: string; statusCode?: number; isError: boolean }): boolean {
+  return log.isError || (log.statusCode !== undefined && log.statusCode >= 500) || /crash|task service failed|unhandled|exception/i.test(`${log.level} ${log.message}`);
+}
+
 type WatchLog = {
   id: string;
   level: string;
@@ -208,14 +212,20 @@ function WatchTelemetry({ watch }: { watch: WatchState | null }) {
     {watch?.logsError && <p className="telemetry-error" role="status">{watch.logsError}</p>}
     {!watch && <p className="telemetry-empty">Live telemetry appears when the controller is running.</p>}
     {watch && !watch.logsError && logs.length === 0 && <p className="telemetry-empty">No runtime logs returned for the current deployment.</p>}
-    {logs.length > 0 && <ol className="runtime-logs">
-      {logs.map(log => <li key={log.id} className={log.isError ? 'runtime-log-error' : ''}>
+    {logs.length > 0 && <>
+      {logs.some(log => crashLine(log)) && <div className="crash-highlight" role="status">
+        <strong>Crash in these lines</strong>
+        <ul>{logs.filter(log => crashLine(log)).slice(-8).map(log => <li key={`crash-${log.id}`}>{log.statusCode ? `HTTP ${log.statusCode} ` : ''}{log.message}</li>)}</ul>
+      </div>}
+      <ol className="runtime-logs">
+      {logs.map(log => <li key={log.id} className={crashLine(log) ? 'runtime-log-error runtime-log-crash' : ''}>
         <time dateTime={new Date(log.timestamp).toISOString()}>{formatTime(new Date(log.timestamp).toISOString())}</time>
-        <span className="runtime-log-level">{log.level}</span>
+        <span className="runtime-log-level">{crashLine(log) ? 'crash' : log.level}</span>
         {log.statusCode !== undefined && <span className="runtime-log-status">HTTP {log.statusCode}</span>}
         <p>{log.message}</p>
       </li>)}
-    </ol>}
+    </ol>
+    </>}
   </section>;
 }
 

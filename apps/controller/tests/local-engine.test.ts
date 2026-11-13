@@ -159,9 +159,9 @@ describe('local incident engine', () => {
     try {
       const incident = await runOnePoll({ demoBaseUrl: demo.url, store }, store);
       expect(incident!.status).toBe('needs_human');
-      expect(incident!.decision).toBe('escalate');
+      expect(incident!.decision).toBe('fix_pr');
       expect(incident!.escalation?.reason).toContain('conflicting');
-      expect(incident!.escalation?.recommendedNextStep).toBeString();
+      expect(incident!.escalation?.recommendedNextStep).toContain('sandbox');
       expect(demo.actions).toEqual([]);
     } finally {
       await demo.close();

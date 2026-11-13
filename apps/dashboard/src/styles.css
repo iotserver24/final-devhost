@@ -329,6 +329,11 @@ h1, h2, strong { font-family: 'IBM Plex Sans', sans-serif; }
 .field-grid { display: grid; gap: 12px; }
 .field-grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .setup-field { display: grid; min-width: 0; gap: 6px; color: #c4c4c4; font-size: 11px; font-weight: 500; }
+.repo-results { display: grid; gap: 8px; margin-top: 10px; color: var(--muted); font-size: 12px; }
+.repo-results p { margin: 0; }
+.repo-results ul { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.repo-results button { width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 7px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.repo-results button.selected, .repo-results button:hover { border-color: #8fd; color: #eafff8; }
 .setup-field small { color: var(--faint); font-size: 10px; font-weight: 400; }
 .field-wide { grid-column: 1 / -1; }
 .toggle-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 12px; }
@@ -663,7 +668,12 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .log-heading strong { color: var(--text); font-family: 'Space Grotesk', sans-serif; font-size: 13px; }
 .log-heading span { color: var(--faint); font-size: 10px; }
 .telemetry-empty { margin: 0; color: var(--muted); font-size: 12px; }
-.runtime-logs { display: grid; gap: 0; max-height: 300px; margin: 0; padding: 0; overflow-y: auto; list-style: none; }
+.crash-highlight { margin: 0 0 12px; padding: 12px 14px; border: 1px solid #ed766e; border-radius: 8px; background: rgba(237, 118, 110, .12); }
+.crash-highlight strong { color: #ffb4ae; font-size: 12px; }
+.crash-highlight ul { margin: 8px 0 0; padding-left: 18px; color: #ffd2ce; font-size: 12px; line-height: 1.5; }
+.crash-highlight li + li { margin-top: 6px; }
+.runtime-logs { display: grid; gap: 0; max-height: 70vh; margin: 0; padding: 0; overflow-y: auto; list-style: none; }
+.runtime-log-crash { outline: 1px solid #ed766e; }
 .runtime-logs li { display: grid; grid-template-columns: 74px 52px 72px minmax(0, 1fr); gap: 10px; align-items: baseline; padding: 9px 4px; border-bottom: 1px solid var(--line); font-size: 11px; }
 .runtime-logs li:last-child { border-bottom: 0; }
 .runtime-logs time { color: var(--faint); font-variant-numeric: tabular-nums; }
@@ -702,7 +712,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .transcript-run-picker { flex-wrap: wrap; margin-bottom: 12px; }
 .transcript-run-picker select { max-width: 100%; margin-left: 6px; padding: 5px 8px; font-size: 11px; }
 .transcript-run-picker > span { overflow-wrap: anywhere; }
-.transcript-feed { display: block; height: 440px; max-height: 65vh; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); padding: 0 16px; scrollbar-color: var(--line-strong) transparent; }
+.transcript-feed { display: block; height: 70vh; max-height: none; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); padding: 0 16px; scrollbar-color: var(--line-strong) transparent; }
 .transcript-entry { padding: 15px 0; border-bottom: 1px solid var(--line); }
 .transcript-entry:last-child { border-bottom: none; }
 .transcript-meta { align-items: baseline; margin-bottom: 7px; color: var(--muted); font-size: 10px; }
@@ -712,7 +722,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .transcript-prose, .transcript-line { margin: 0; color: var(--text); font-size: 13px; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; }
 .transcript-line { font-size: 12px; color: var(--muted); }
 .transcript-detail summary { color: var(--text); font-size: 12px; cursor: pointer; overflow-wrap: anywhere; }
-.transcript-detail pre { margin: 12px 0 0; padding: 12px; border: 1px solid var(--line); border-radius: 6px; color: var(--text); background: var(--surface); font-size: 11px; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 420px; overflow: auto; tab-size: 2; }
+.transcript-detail pre { margin: 12px 0 0; padding: 12px; border: 1px solid var(--line); border-radius: 6px; color: var(--text); background: var(--surface); font-size: 11px; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 70vh; overflow: auto; tab-size: 2; }
 .kind-summary .transcript-prose { color: var(--success); }
 @media (max-width: 640px) {
   .transcript-feed { padding: 0 12px; height: 380px; }
