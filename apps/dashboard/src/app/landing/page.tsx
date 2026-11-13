@@ -1,4 +1,5 @@
 import './landing.css';
+import { ThemeToggle } from '../../ThemeToggle';
 
 const features = [
   { label: '01 / Detect', title: 'The first failure is a signal. The third is a decision.', body: 'Sentinel watches the route your users actually hit, then builds a bounded failure streak before it acts.', className: 'feature-detect' },
@@ -35,7 +36,7 @@ export default function LandingPage() {
     <nav className="landing-nav">
       <a className="landing-brand" href="/landing" aria-label="Sentinel home"><Mark /><span>SENTINEL<small>deploy watch</small></span></a>
       <div className="landing-nav-links"><a href="#system">System</a><a href="#features">Capabilities</a><a href="#safety">Safety</a></div>
-      <a className="nav-cta" href="/">Open control room <ExternalArrow /></a>
+      <div className="landing-nav-actions"><ThemeToggle /><a className="nav-cta" href="/">Open control room <ExternalArrow /></a></div>
     </nav>
 
     <section className="landing-hero">

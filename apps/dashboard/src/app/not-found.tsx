@@ -1,5 +1,7 @@
 import Link from 'next/link';
 import './not-found.css';
+import '../styles.css';
+import { ThemeToggle } from '../ThemeToggle';
 
 function Arrow({ forward = false }: { forward?: boolean }) {
   return <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true"><path d={forward ? 'M2 8h11M8 3l5 5-5 5' : 'M3 13 13 3M6 3h7v7'} /></svg>;
@@ -13,6 +15,7 @@ export default function NotFound() {
         <span>SENTINEL<small>deploy watch</small></span>
       </Link>
       <span className="not-found-status">404 / PAGE NOT FOUND</span>
+      <ThemeToggle />
     </header>
     <section className="not-found-content" aria-labelledby="not-found-title">
       <p className="not-found-code" aria-hidden="true">404</p>
