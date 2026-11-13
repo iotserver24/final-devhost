@@ -61,6 +61,26 @@ describe('integration settings', () => {
     }
   });
 
+  it('uses the explicitly connected GitHub app installation instead of stale host credentials', async () => {
+    const store = new IncidentStore(':memory:');
+    const keys = ['GITHUB_APP_ID', 'GITHUB_APP_PEM', 'GITHUB_INSTALLATION_ID'] as const;
+    const before = Object.fromEntries(keys.map(key => [key, process.env[key]]));
+    try {
+      for (const key of keys) process.env[key] = 'old';
+      await store.writeSettings({ GITHUB_APP_ID: 'app', GITHUB_APP_PEM: 'pem', GITHUB_INSTALLATION_ID: 'installation' });
+      await applyStoredSettings(store);
+      expect(process.env.GITHUB_APP_ID).toBe('app');
+      expect(process.env.GITHUB_APP_PEM).toBe('pem');
+      expect(process.env.GITHUB_INSTALLATION_ID).toBe('installation');
+    } finally {
+      for (const key of keys) {
+        if (before[key] === undefined) delete process.env[key];
+        else process.env[key] = before[key];
+      }
+      store.close();
+    }
+  });
+
   it('keeps a host environment value ahead of a saved dashboard value', async () => {
     const store = new IncidentStore(':memory:');
     await store.writeSettings({ CONTROLLER_REMEDIATION_ENABLED: 'false', SMTP_TO: 'judge@example.com' });
