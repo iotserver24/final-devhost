@@ -45,46 +45,13 @@ The controller is not required for this **isolated demonstration**. Copy `.env.e
 
 ```sh
 bun run --cwd packages/remediator demo:fix --sha=$(git rev-parse origin/main)
-# Only after reviewing the dry-run outcome; this repeats the model run and opens a draft PR:
-bun run --cwd packages/remediator demo:fix --sha=$(git rev-parse origin/main) --publish
 ```
 
-`demo:fix` uploads the trusted regression fixture into E2B before the baseline, rejects agent edits to that test, requires failing-before/passing-after plus all sample tests/build, and prints only a summary. Without `--publish`, it never pushes or opens a PR. With `--publish`, the **controller-side** publisher needs a repository-scoped `GH_TOKEN`; no write token enters E2B. This is a fixture-driven PR demo, **not** production incident detection or automatic rollback. The exact cloned commit must not already contain `apps/sample/tests/filter.repro.test.ts`.
+`demo:fix` runs an isolated diagnosis with the trusted regression fixture and does not publish a PR. Use the controller incident workflow to open an issue and wait for an authorized owner comment before creating a fix. The exact cloned commit must not already contain `apps/sample/tests/filter.repro.test.ts`.
 
 ## Controller integration
 
-Add `"@nexathon/remediator": "workspace:*"` to `apps/controller/package.json` and run `bun install` at the root before importing this package. The controller owns the incident-to-request mapping and keeps its GitHub write token locally.
-
-```ts
-import { generateFixInE2B, publishDraftPr } from '@nexathon/remediator';
-
-const request = {
-  incidentId: incident.id,
-  repository: 'iotserver24/nexathon',
-  commitSha: incident.commitSha, // exact 40-character SHA
-  evidence: incident.evidence,   // redact and bound before dispatch
-  setupCommand: 'bun install --frozen-lockfile --filter ./apps/sample',
-  reproduceCommand: 'bun test apps/sample/tests/repro.test.ts',
-  testCommand: 'bun run --cwd apps/sample test',
-  buildCommand: 'bun run --cwd apps/sample build',
-};
-
-const fix = await generateFixInE2B(request, {
-  modelName: 'dedicated-model',
-  modelId: process.env.REMEDIATOR_MODEL_ID!,
-  baseUrl: process.env.REMEDIATOR_MODEL_BASE_URL!, // HTTPS API root, e.g. /v1
-  apiBackend: 'responses', // or chat_completions/messages, matching provider
-  apiKey: process.env.REMEDIATOR_MODEL_API_KEY!,
-  githubReadToken: process.env.GITHUB_READ_TOKEN!,
-});
-
-if (fix.ok) {
-  const pr = await publishDraftPr(request, fix); // controller machine only; GH_TOKEN required
-  // Persist pr.url, notify Slack, and leave review/merge to humans.
-} else {
-  // Persist fix.reason + fix.message as a failed automatic attempt; never open an unverified PR.
-}
-```
+The controller owns the incident-to-request mapping and keeps its GitHub write token locally. It opens the incident issue before diagnosis, updates the issue with the failing regression test and a question, and resumes the paused sandbox only after an authorized comment. The controller then verifies the fix and opens a PR referencing that issue. See `apps/controller/src/actions.ts` and `apps/controller/src/comment-gate.ts` for the workflow.
 
 `E2B_REMEDIATOR_TEMPLATE` is required on the controller. The default E2B base sandbox was killed (exit 137) by the sample app dependency install. This repo now contains the source at `e2b-template/Dockerfile` for the `devhost-fix` template: 16 vCPUs, 16384 MiB RAM, and Supercharge 1.4.22. Do not use the default base template for a fix run.
 

@@ -117,6 +117,31 @@ function wrapIdentifiers(line: string): string {
   });
 }
 
+/** Record the incident before diagnosis, without claiming a test or fix exists. */
+export async function openPendingIncidentIssue(repository: string, token: string, incidentId: string): Promise<IncidentIssue> {
+  const response = await fetch(`https://api.github.com/repos/${repository}/issues`, {
+    method: 'POST',
+    headers: { Accept: 'application/vnd.github+json', Authorization: `Bearer ${token}`, 'User-Agent': 'sentinel', 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title: `Incident ${incidentId}`, body: `Incident \`${incidentId}\`.\n\nDiagnosis is in progress. Sentinel will update this issue with evidence and a proposed method before requesting an owner comment.` }),
+  });
+  if (!response.ok) throw new Error(`GitHub did not open an issue (${response.status}).`);
+  const body = await response.json() as { number?: unknown; html_url?: unknown };
+  if (typeof body.number !== 'number' || typeof body.html_url !== 'string') throw new Error('GitHub issue response had no number.');
+  return { number: body.number, url: body.html_url };
+}
+
+/** Replace the pending issue text with the verified diagnosis and owner question. */
+export async function updateIncidentIssue(repository: string, token: string, issueNumber: number, input: {
+  incidentId: string; diagnosis: string; question: string; testPath: string;
+}): Promise<void> {
+  const response = await fetch(`https://api.github.com/repos/${repository}/issues/${issueNumber}`, {
+    method: 'PATCH',
+    headers: { Accept: 'application/vnd.github+json', Authorization: `Bearer ${token}`, 'User-Agent': 'sentinel', 'Content-Type': 'application/json' },
+    body: JSON.stringify({ body: incidentIssueBody(input) }),
+  });
+  if (!response.ok) throw new Error(`GitHub did not update the issue (${response.status}).`);
+}
+
 /** Open a GitHub issue the repository owner can answer. The token stays in the request header. */
 export async function openIncidentIssue(repository: string, token: string, input: {
   incidentId: string;

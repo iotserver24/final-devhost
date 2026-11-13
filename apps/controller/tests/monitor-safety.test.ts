@@ -469,6 +469,13 @@ describe('monitor safety boundaries', () => {
     expect(incident.events.map(event => event.type)).toContain('rollback_completed');
     expect(incident.events.map(event => event.type)).toContain('cold');
 
+    const alreadyRolledBack = provider();
+    const previousRollback = { ...incident, id: 'inc-already-rolled-back', events: [{ at: at.toISOString(), type: 'rollback_started', message: 'Rollback attempted.' }], evidence: [] as string[] };
+    await applyRemediationOutcome(previousRollback, {
+      ok: true, kind: 'fix', verifiedRegression: true, actionUrl: 'https://github.com/iotserver24/final-devhost/pull/11', message: 'Verified fix',
+    }, makeOptions(alreadyRolledBack.implementation));
+    expect(alreadyRolledBack.calls.rollback).toBe(0);
+
     const failingPrevious = provider({ probeImmutableDeployment: async () => probe('fail') });
     const skipped = {
       ...incident,

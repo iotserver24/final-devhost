@@ -26,6 +26,7 @@ import {
 import { RichText } from './RichText';
 import { groupCopies } from './rich-text';
 import { IssueReport } from './IssueReport';
+import { incidentActionLabel } from './incident-action';
 
 const mode: DataMode = process.env.NEXT_PUBLIC_DATA_MODE === 'fixtures' ? 'fixtures' : 'live';
 
@@ -70,7 +71,7 @@ function StatusPill({ status }: { status: Incident['status'] }) {
 }
 
 function rolledBack(incident: Incident) {
-  return incident.events.some(event => event.type === 'rollback_started' || event.type === 'rollback_completed');
+  return incident.events.some(event => event.type === 'rollback_completed');
 }
 
 function waitingOnComment(incident: Incident) {
@@ -97,7 +98,12 @@ function actionSummary(incident: Incident) {
 }
 
 function decisionSummary(incident: Incident) {
-  if (rolledBack(incident) && incident.decision === 'fix_pr') return 'Rolled back, then fix PR';
+  if (rolledBack(incident) && incident.decision === 'fix_pr') {
+    if (waitingOnComment(incident)) return 'Rolled back · awaiting comment';
+    if (incident.status === 'pr_opened') return 'Rolled back · fix PR open';
+    if (incident.status === 'remediation_failed') return 'Rolled back · fix attempt failed';
+    return 'Rolled back · fix in progress';
+  }
   if (rolledBack(incident) && incident.status === 'remediating') return 'Rolled back, fix in progress';
   return incident.decision ? decisionLabels[incident.decision] : 'Pending';
 }
@@ -262,9 +268,7 @@ function Overview({ watch }: { watch: WatchState | null }) {
 }
 
 function Detail({ incident, watch }: { incident: Incident; watch: WatchState | null }) {
-  const actionLabel = waitingOnComment(incident) || incident.actionUrl?.includes('/issues/')
-    ? 'Open GitHub issue'
-    : incident.decision === 'fix_pr' ? 'Open pull request' : incident.decision === 'rollback' ? 'View rollback target' : 'View action';
+  const actionLabel = incident.actionUrl ? incidentActionLabel(incident.actionUrl, rolledBack(incident)) : 'View action';
   const detected = incident.events.find(event => event.type === 'detected');
   const decision = incident.events.find(event => event.type === 'decision');
   return <main className="detail">

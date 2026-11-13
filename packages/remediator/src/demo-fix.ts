@@ -1,14 +1,12 @@
 import { readFile } from 'node:fs/promises';
 import { generateFixInE2B } from './e2b-runner.js';
-import { publishDraftPr } from './pr-publisher.js';
 import type { ProviderConfig, RemediationRequest } from './types.js';
 
 /** Manual fix-path demonstration, independent of the unfinished controller. */
 const sha = process.argv.find((arg) => arg.startsWith('--sha='))?.slice('--sha='.length);
-const publish = process.argv.includes('--publish');
-if (!sha || !/^[0-9a-f]{40}$/i.test(sha)) throw new Error('Usage: bun run demo:fix --sha=<full SHA> [--publish]');
+if (process.argv.includes('--publish')) throw new Error('Use the controller incident workflow to open an issue and wait for an owner comment before publishing a PR.');
+if (!sha || !/^[0-9a-f]{40}$/i.test(sha)) throw new Error('Usage: bun run demo:fix --sha=<full SHA>');
 const required = ['E2B_API_KEY', 'E2B_REMEDIATOR_TEMPLATE', 'REMEDIATOR_MODEL_ID', 'REMEDIATOR_MODEL_BASE_URL', 'REMEDIATOR_MODEL_API_KEY', 'GITHUB_READ_TOKEN'];
-if (publish) required.push('GH_TOKEN');
 const missing = required.filter((key) => !process.env[key]);
 if (missing.length) throw new Error(`Missing dedicated credentials/configuration: ${missing.join(', ')}`);
 const backend = process.env.REMEDIATOR_MODEL_API_BACKEND || 'responses';
@@ -37,19 +35,14 @@ const provider: ProviderConfig = {
   apiKey: process.env.REMEDIATOR_MODEL_API_KEY!,
   githubReadToken: process.env.GITHUB_READ_TOKEN!,
 };
-console.log(`Starting isolated fixture remediation at ${sha.slice(0, 12)}; production and GitHub are unchanged unless --publish succeeds.`);
+console.log(`Starting isolated fixture diagnosis at ${sha.slice(0, 12)}; production and GitHub are unchanged.`);
 const fix = await generateFixInE2B(request, provider);
 if (!fix.ok) {
   console.error(JSON.stringify({ incidentId: fix.incidentId, reason: fix.reason, message: fix.message, evidence: fix.evidence }, null, 2));
   process.exitCode = 1;
 } else if ('patch' in fix) {
   console.log(JSON.stringify({ incidentId: fix.incidentId, changedFiles: fix.changedFiles, mcpConfigured: fix.mcpConfigured, tests: 'passed', build: 'passed' }, null, 2));
-  if (publish) {
-    const pr = await publishDraftPr(request, fix);
-    console.log(`Draft PR opened for human review: ${pr.url}`);
-  } else {
-    console.log('No PR opened. Pass --publish with a repository-scoped GH_TOKEN to publish a new verified run.');
-  }
+  console.log('No PR opened. Use the controller incident workflow to open an issue and wait for an owner comment.');
 } else if (fix.phase === 'awaiting_comment') {
   console.log(JSON.stringify({ incidentId: fix.incidentId, phase: fix.phase, sandboxId: fix.sandboxId, question: fix.question, testPath: fix.testPath }, null, 2));
   console.log('Sandbox is paused. A repository comment has to choose the method before a pull request is opened.');

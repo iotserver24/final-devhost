@@ -115,8 +115,12 @@ async function run(file: string, args: string[], cwd: string, env: NodeJS.Proces
  */
 export async function publishDraftPr(request: RemediationRequest, fix: RemediationResult): Promise<DraftPrResult> {
   validateRequest(request);
-  if (!fix.ok || !('patch' in fix) || fix.incidentId !== request.incidentId || fix.baseSha.toLowerCase() !== request.commitSha.toLowerCase()) {
+  if (!fix.ok || !('patch' in fix) || fix.verifiedRegression !== true || fix.incidentId !== request.incidentId || fix.baseSha.toLowerCase() !== request.commitSha.toLowerCase()) {
     throw new Error('Only a verified fix for the same incident and base revision can be published');
+  }
+  const issuePrefix = `https://github.com/${request.repository}/issues/`;
+  if (!request.issueUrl?.startsWith(issuePrefix) || !/^[1-9]\d*$/.test(request.issueUrl.slice(issuePrefix.length))) {
+    throw new Error('A matching incident issue is required before publishing a pull request');
   }
   const patchedPaths = validatePatch(fix.patch);
   const token = process.env.GH_TOKEN;

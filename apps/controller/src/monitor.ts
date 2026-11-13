@@ -290,7 +290,8 @@ export async function applyRemediationOutcome(incident: Incident, result: Remedi
     const actionAt = new Date().toISOString();
     incident.timing = { ...(incident.timing ?? {}), actionAt };
     incident.events.push(event(actionAt, 'draft_pr', result.message));
-    if (result.verifiedRegression && incident.deploymentId && incident.probePath) {
+    const rollbackAlreadyAttempted = incident.events.some(item => item.type === 'rollback_started' || item.type === 'rollback_completed');
+    if (result.verifiedRegression && incident.deploymentId && incident.probePath && !rollbackAlreadyAttempted) {
       await rollbackIfLatestCommit(incident, options);
     }
     if (result.sandboxId) {

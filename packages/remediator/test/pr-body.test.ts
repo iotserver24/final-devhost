@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { formatPullRequestBody } from '../src/pr-publisher';
+import { formatPullRequestBody, publishDraftPr } from '../src/pr-publisher';
 
 describe('pull request body', () => {
   test('puts the result first and the command logs behind disclosures', () => {
@@ -19,5 +19,23 @@ describe('pull request body', () => {
     expect(body).toContain('```text\n1 fail\n```');
     expect(body).toContain('```text\n1 pass\n```');
     expect(body).toContain('Nothing is merged automatically.');
+  });
+});
+
+describe('pull request publishing gates', () => {
+  test('rejects an unverified fix or a missing or unrelated issue before touching GitHub', async () => {
+    const request = {
+      incidentId: 'inc-test', repository: 'iotserver24/final-devhost', commitSha: 'a'.repeat(40),
+      evidence: [], setupCommand: 'bun install', reproduceCommand: 'bun test', testCommand: 'bun test', buildCommand: 'bun run build',
+    };
+    const fix = {
+      ok: true as const, incidentId: request.incidentId, baseSha: request.commitSha, patch: 'patch', changedFiles: [],
+      baseline: 'fail', agentSummary: 'fix', testOutput: 'pass', buildOutput: 'pass', mcpConfigured: true,
+    };
+    await expect(publishDraftPr(request, fix)).rejects.toThrow('Only a verified fix');
+    const verified = { ...fix, verifiedRegression: true };
+    await expect(publishDraftPr(request, verified)).rejects.toThrow('matching incident issue');
+    await expect(publishDraftPr({ ...request, issueUrl: 'https://github.com/other/repo/issues/42' }, verified)).rejects.toThrow('matching incident issue');
+    await expect(publishDraftPr({ ...request, issueUrl: 'https://github.com/iotserver24/final-devhost/issues/42' }, verified)).rejects.toThrow('Patch has no valid file headers');
   });
 });
