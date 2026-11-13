@@ -12,8 +12,8 @@ export function githubConnectPage(origin: string, owner?: string): string {
     callback_urls: [redirect],
     setup_url: `${origin}/api/github/installed`,
     public: false,
-    default_permissions: { contents: 'write', pull_requests: 'write', metadata: 'read' },
-    default_events: origin.startsWith('https://') ? ['push', 'pull_request'] : [],
+    default_permissions: { contents: 'write', issues: 'write', pull_requests: 'write', metadata: 'read' },
+    default_events: origin.startsWith('https://') ? ['issue_comment', 'pull_request', 'push'] : [],
     request_oauth_on_install: false,
     ...(origin.startsWith('https://') ? { hook_attributes: { url: `${origin}/api/github/webhook`, active: true } } : {}),
   };
@@ -139,18 +139,33 @@ export async function listInstallationRepositories(appId: string, pem: string, i
 
 export async function installationToken(appId: string, pem: string, installationId: string, access: 'read' | 'write'): Promise<string> {
   const permissions = access === 'write'
-    ? { contents: 'write', pull_requests: 'write', metadata: 'read' }
-    : { contents: 'read', metadata: 'read' };
-  const response = await fetch(`https://api.github.com/app/installations/${encodeURIComponent(installationId)}/access_tokens`, {
+    ? { contents: 'write', issues: 'write', pull_requests: 'write', metadata: 'read' }
+    : { contents: 'read', issues: 'read', metadata: 'read' };
+  const headers = {
+    Accept: 'application/vnd.github+json',
+    Authorization: `Bearer ${appJwt(appId, pem)}`,
+    'User-Agent': 'sentinel',
+    'Content-Type': 'application/json',
+  };
+  let response = await fetch(`https://api.github.com/app/installations/${encodeURIComponent(installationId)}/access_tokens`, {
     method: 'POST',
-    headers: {
-      Accept: 'application/vnd.github+json',
-      Authorization: `Bearer ${appJwt(appId, pem)}`,
-      'User-Agent': 'sentinel',
-      'Content-Type': 'application/json',
-    },
+    headers,
     body: JSON.stringify({ permissions }),
   });
+  if (!response.ok && access === 'write') {
+    response = await fetch(`https://api.github.com/app/installations/${encodeURIComponent(installationId)}/access_tokens`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ permissions: { contents: 'write', pull_requests: 'write', metadata: 'read' } }),
+    });
+  }
+  if (!response.ok && access === 'read') {
+    response = await fetch(`https://api.github.com/app/installations/${encodeURIComponent(installationId)}/access_tokens`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ permissions: { contents: 'read', metadata: 'read' } }),
+    });
+  }
   if (!response.ok) throw new Error('GitHub did not issue an installation token.');
   const body = await response.json() as { token?: string };
   if (!body.token) throw new Error('GitHub did not issue an installation token.');

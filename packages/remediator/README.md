@@ -5,7 +5,7 @@ Bun/TypeScript package for the **fix-PR path only**. The trusted local controlle
 ## Implemented
 
 - Creates a 10-minute E2B sandbox from the configured 4 GiB+ custom template, clones the allowlisted public `iotserver24/nexathon` repo at an exact 40-character SHA, uses preinstalled **Bun 1.3.11** (or installs it when using another compatible template) and runs the configured setup command.
-- Runs the configured reproduction first. If it passes, the agent investigates the code and full runtime logs and adds an incident-specific regression test; the controller independently verifies that test fails against the original source and passes after the fix. Existing tests may not be weakened. Uses preinstalled verified published **Supercharge CLI 1.3.30** in the sandbox (or installs it as a fallback) (the hosted installer currently needs `SUPERCHARGE_GITHUB_REPO=iotserver24/supercharge-releases`). Configures a dedicated model provider and GitHub's remote MCP in read-only mode using a separate read-only token.
+- Runs the configured reproduction first. If it passes, the agent investigates the code and full runtime logs and adds an incident-specific regression test; the controller independently verifies that test fails against the original source and passes after the fix. Existing tests may not be weakened. Uses preinstalled **Supercharge CLI 1.4.22** in the sandbox (or installs it as a fallback from `supercharge-cli/supercharge-releases`). Configures a dedicated model provider and GitHub's remote MCP in read-only mode using a separate read-only token.
 - Runs Supercharge headlessly with a prompt file, automatic tool approval **only inside E2B**, no subagents, an 18-turn cap, and a 270-second command cap. Files from GitHub, PRs and logs are untrusted inputs. Limits edited files to `apps/sample/`.
 - Runs reproduction, all tests, and build again. Returns a bounded unified patch plus redacted evidence; refuses empty, binary, symlink, secret-bearing, outside-path, failed-test, or failed-build changes. Destroys the sandbox in `finally`.
 - A separate **controller-only** `publishDraftPr()` revalidates the patch, clones the exact base SHA into a temporary directory, applies it, pushes `agent/incident-<id>` via a controller-only `GH_TOKEN`, and opens a **draft** PR. No write token enters E2B.
@@ -19,7 +19,7 @@ bun install
 bun run --cwd packages/remediator typecheck
 bun test --cwd packages/remediator
 bun run --cwd packages/remediator smoke:e2b
-E2B_REMEDIATOR_TEMPLATE=nexathon-remediator \
+E2B_REMEDIATOR_TEMPLATE=devhost-fix \
   SMOKE_ASSERT_PREINSTALLED=1 SMOKE_MCP_CONFIG=1 \
   SMOKE_INSTALL_TARGET=sample SMOKE_CLONE_SHA=$(git rev-parse HEAD) \
   bun run --cwd packages/remediator smoke:e2b
@@ -32,7 +32,7 @@ The last two commands create a short-lived **real E2B sandbox** and require `E2B
 After the sample app has been merged, the following command clones that exact revision in a 4 GiB E2B sandbox, uploads a **temporary** regression test for task filtering, proves it fails, applies a test-only deterministic repair, and verifies the targeted test, all sample tests, Next build, and the safe patch boundary:
 
 ```sh
-E2B_REMEDIATOR_TEMPLATE=nexathon-remediator \
+E2B_REMEDIATOR_TEMPLATE=devhost-fix \
   SMOKE_CLONE_SHA=$(git rev-parse origin/main) \
   bun run --cwd packages/remediator smoke:fixture
 ```
@@ -86,7 +86,7 @@ if (fix.ok) {
 }
 ```
 
-`E2B_REMEDIATOR_TEMPLATE` is required on the controller. The default E2B base sandbox was killed (exit 137) by the sample app dependency install. This repo now contains the source at `e2b-template/Dockerfile` for our dedicated `nexathon-remediator` 4 GiB template, built and smoke-tested with sample tests/build and the deterministic fix rehearsal. Do not use the default base template for a fix run.
+`E2B_REMEDIATOR_TEMPLATE` is required on the controller. The default E2B base sandbox was killed (exit 137) by the sample app dependency install. This repo now contains the source at `e2b-template/Dockerfile` for the `devhost-fix` template: 16 vCPUs, 16384 MiB RAM, and Supercharge 1.4.22. Do not use the default base template for a fix run.
 
 `setupCommand`, `reproduceCommand`, `testCommand`, and `buildCommand` must be **trusted project configuration**, not text taken from an alert, PR, or model output. `publishDraftPr` requires `GH_TOKEN` with Contents and Pull requests write access scoped to this repo; `GITHUB_READ_TOKEN` must be separate and read-only. Keep both and the provider key in local secrets, not `.env` committed to Git. GitHub MCP configuration uses `X-MCP-Readonly: true`, but the token itself should also have minimum permissions.
 
@@ -94,7 +94,7 @@ if (fix.ok) {
 
 - Ronit must add the sample app, a reproducible failing-test fixture, and the controller's shared incident contract. Then connect the controller's `fix_pr` decision to `generateFixInE2B` and persist its result.
 - Anish needs a **dedicated** model API credential and a read-only GitHub MCP token before the first full fix run. E2B sandbox creation, preinstalled Bun/Supercharge versions, sample install/build, and the deterministic fixture have been smoke-tested with the available E2B key; **the model-driven fix and PR creation are not yet end-to-end verified**.
-- The published Supercharge release is currently 1.3.30 despite a newer locally built binary/docs. If the release changes, verify the exact installer asset and CLI flags before upgrading the pinned version.
+- The published Supercharge release used here is 1.4.22, the current Latest tag on https://github.com/supercharge-cli/supercharge-releases/releases. If the release changes, verify the installer asset and CLI flags before upgrading the pinned version.
 
 ## Agent transcript
 

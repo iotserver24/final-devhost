@@ -78,6 +78,12 @@ export interface RemediationOutcome {
   actionUrl?: string;
   message: string;
   evidence?: string[];
+  /** waiting pauses before the fix. reply answers a later comment. A fix opens the pull request. */
+  kind?: 'waiting' | 'reply' | 'fix';
+  sandboxId?: string;
+  issueNumber?: number;
+  /** The incident regression test failed before the patch and passed after it. */
+  verifiedRegression?: boolean;
 }
 
 export interface MonitorActions {
@@ -245,28 +251,80 @@ export async function finishRemediation(
   await options.store.save(incident);
   try {
     const result = await remediate(incident);
-    if (result.ok) {
-      incident.status = 'pr_opened';
-      incident.decision = 'fix_pr';
-      const actionUrl = safeLink(result.actionUrl);
-      if (actionUrl) incident.actionUrl = actionUrl;
-      incident.evidence.push(...(result.evidence ?? []).map(evidence));
-      const actionAt = new Date().toISOString();
-      incident.timing = { ...(incident.timing ?? {}), actionAt };
-      incident.events.push(event(actionAt, 'draft_pr', result.message));
-    } else {
-      incident.status = 'remediation_failed';
-      incident.decision = 'fix_pr';
-      incident.evidence.push(result.message, ...(result.evidence ?? []).map(evidence));
-      incident.events.push(event(new Date().toISOString(), 'remediation_failed', result.message));
-    }
+    await applyRemediationOutcome(incident, result, options);
   } catch {
     incident.status = 'remediation_failed';
     incident.decision = 'fix_pr';
     incident.evidence.push('Remediation failed unexpectedly; no PR was created.');
     incident.events.push(event(new Date().toISOString(), 'remediation_failed', 'The fix attempt failed unexpectedly before a verified PR was created.'));
+    await saveAndNotify(incident, options);
+  }
+}
+
+export async function applyRemediationOutcome(incident: Incident, result: RemediationOutcome, options: MonitorOptions): Promise<void> {
+  if (result.ok && result.kind === 'waiting') {
+    incident.status = 'needs_human';
+    incident.decision = 'fix_pr';
+    const actionUrl = safeLink(result.actionUrl);
+    if (actionUrl) incident.actionUrl = actionUrl;
+    incident.evidence.push(...(result.evidence ?? []).map(evidence));
+    incident.events.push(event(new Date().toISOString(), 'awaiting_comment', result.message));
+    await saveAndNotify(incident, options);
+    return;
+  }
+  if (result.ok && result.kind === 'reply') {
+    incident.status = 'pr_opened';
+    incident.events.push(event(new Date().toISOString(), 'comment_answered', result.message));
+    if (result.sandboxId) incident.events.push(event(new Date().toISOString(), 'cold', `Paused after the reply. sandbox=${result.sandboxId}${result.issueNumber ? ` issue #${result.issueNumber}` : ''}`));
+    await saveAndNotify(incident, options);
+    return;
+  }
+  if (result.ok) {
+    incident.status = 'pr_opened';
+    incident.decision = 'fix_pr';
+    const actionUrl = safeLink(result.actionUrl);
+    if (actionUrl) incident.actionUrl = actionUrl;
+    incident.evidence.push(...(result.evidence ?? []).map(evidence));
+    const actionAt = new Date().toISOString();
+    incident.timing = { ...(incident.timing ?? {}), actionAt };
+    incident.events.push(event(actionAt, 'draft_pr', result.message));
+    if (result.verifiedRegression && incident.deploymentId && incident.probePath) {
+      await rollbackIfLatestCommit(incident, options);
+    }
+    if (result.sandboxId) {
+      incident.events.push(event(new Date().toISOString(), 'cold', `Paused after the pull request. sandbox=${result.sandboxId}${result.issueNumber ? ` issue #${result.issueNumber}` : ''}`));
+    }
+  } else {
+    incident.status = 'remediation_failed';
+    incident.decision = 'fix_pr';
+    incident.evidence.push(result.message, ...(result.evidence ?? []).map(evidence));
+    incident.events.push(event(new Date().toISOString(), 'remediation_failed', result.message));
   }
   await saveAndNotify(incident, options);
+}
+
+/** Roll back only when the same route fails now and passed on the immediate previous deployment. */
+async function rollbackIfLatestCommit(incident: Incident, options: MonitorOptions): Promise<void> {
+  if (!incident.deploymentId || !incident.probePath) return;
+  try {
+    const previous = await options.provider.getPreviousDeployment(options.projectId, incident.deploymentId);
+    if (!previous) {
+      incident.events.push(event(new Date().toISOString(), 'rollback_skipped', 'No previous deployment was available, so this was not rolled back.'));
+      return;
+    }
+    const previousProbe = await options.provider.probeImmutableDeployment(previous.immutableUrl, incident.probePath);
+    const currentProbe = await options.provider.probeProduction(options.projectId, incident.probePath);
+    if (currentProbe.result === 'fail' && previousProbe.result === 'pass') {
+      const rollback = await options.provider.rollbackProductionTo(options.projectId, previous.id);
+      const actionUrl = safeLink(rollback.actionUrl);
+      if (actionUrl) incident.evidence.push(`Production was restored to the previous deployment: ${actionUrl}`);
+      incident.events.push(event(new Date().toISOString(), 'rollback_completed', 'The current deployment failed and the previous deployment passed the same route, so production was restored to that deployment.'));
+      return;
+    }
+    incident.events.push(event(new Date().toISOString(), 'rollback_skipped', `No rollback. Current probe is ${currentProbe.result}; previous deployment probe is ${previousProbe.result}.`));
+  } catch (error) {
+    incident.events.push(event(new Date().toISOString(), 'rollback_failed', `The latest-commit check could not roll back: ${String(error).slice(0, 300)}`));
+  }
 }
 
 function makeBuildFailureIncident(
@@ -495,8 +553,10 @@ export async function checkProject(options: MonitorOptions): Promise<MonitorResu
       updated = true;
     }
     const fixAttempts = existing.events.filter(item => item.type === 'remediation_started').length;
+    const heldForReview = [...existing.events].reverse().find(item => item.type === 'awaiting_comment' || item.type === 'review_resumed' || item.type === 'draft_pr')?.type === 'awaiting_comment';
     const fixStoppedEarly = ['needs_human', 'remediation_failed'].includes(existing.status) && fixAttempts < 10
-      && !existing.events.some(item => item.type === 'draft_pr');
+      && !existing.events.some(item => item.type === 'draft_pr')
+      && !heldForReview;
     if (fixStoppedEarly && options.actions?.remediate) {
       existing.events.push(event(now().toISOString(), 'remediation_retry', 'Retrying the fix. The previous attempt stopped before a pull request.'));
       await options.store.save(existing);

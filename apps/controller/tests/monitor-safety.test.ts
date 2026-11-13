@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { IncidentStore } from '../src/incident-store';
 import {
+  applyRemediationOutcome,
   checkProject,
   type Deployment,
   type DeploymentProvider,
@@ -315,5 +316,71 @@ describe('monitor safety boundaries', () => {
     expect(result.incident.decision).toBe('fix_pr');
     expect(result.incident.evidence.join(' ')).toContain('already recorded');
     expect(calls.rollback).toBe(0);
+  });
+
+  it('does not start a second sandbox while a repository comment is still required', async () => {
+    let fixes = 0;
+    const { implementation } = provider();
+    const options = makeOptions(implementation, {
+      actions: { remediate: async () => { fixes += 1; return { ok: true, message: 'should not run' }; } },
+    });
+    await options.store.save({
+      id: incidentId(projectId, current.id, '/api/tasks'),
+      kind: 'runtime_regression',
+      status: 'needs_human',
+      detectedAt: at.toISOString(),
+      projectId,
+      deploymentId: current.id,
+      commitSha: current.commitSha,
+      probePath: '/api/tasks',
+      decision: 'fix_pr',
+      evidence: [],
+      events: [
+        { at: at.toISOString(), type: 'remediation_started', message: 'Dispatching bounded fix-PR remediation.' },
+        { at: at.toISOString(), type: 'awaiting_comment', message: 'Waiting for a comment on issue #12 before writing the fix. sandbox=sb123' },
+      ],
+    });
+    const result = await driveFailure(options);
+    expect(result.action).toBe('incident');
+    expect(fixes).toBe(0);
+  });
+
+  it('rolls back after a verified fix only when the current route fails and the previous deployment passes', async () => {
+    const passing = provider();
+    const options = makeOptions(passing.implementation, { allowlistedProjectIds: new Set() });
+    const incident = {
+      id: 'inc-proof', kind: 'runtime_regression' as const, status: 'remediating' as const,
+      detectedAt: at.toISOString(), projectId, deploymentId: current.id, probePath: '/api/tasks',
+      commitSha: current.commitSha, evidence: [] as string[], events: [] as { at: string; type: string; message: string }[],
+    };
+    await applyRemediationOutcome(incident, {
+      ok: true, kind: 'fix', verifiedRegression: true, sandboxId: 'sb1', issueNumber: 4,
+      actionUrl: 'https://github.com/iotserver24/final-devhost/pull/9',
+      message: 'Verified patch published',
+    }, options);
+    expect(passing.calls.rollback).toBe(1);
+    expect(incident.events.map(event => event.type)).toContain('rollback_completed');
+    expect(incident.events.map(event => event.type)).toContain('cold');
+
+    const failingPrevious = provider({ probeImmutableDeployment: async () => probe('fail') });
+    const skipped = {
+      ...incident,
+      id: 'inc-proof-old',
+      events: [] as { at: string; type: string; message: string }[],
+      evidence: [] as string[],
+    };
+    await applyRemediationOutcome(skipped, {
+      ok: true, kind: 'fix', verifiedRegression: true, sandboxId: 'sb2', issueNumber: 4,
+      actionUrl: 'https://github.com/iotserver24/final-devhost/pull/10',
+      message: 'Verified patch published',
+    }, makeOptions(failingPrevious.implementation));
+    expect(failingPrevious.calls.rollback).toBe(0);
+    expect(skipped.events.map(event => event.type)).toContain('rollback_skipped');
+
+    const unverified = provider();
+    await applyRemediationOutcome({ ...incident, id: 'inc-plain', events: [], evidence: [] }, {
+      ok: true, message: 'Fix prepared',
+    }, makeOptions(unverified.implementation));
+    expect(unverified.calls.rollback).toBe(0);
   });
 });

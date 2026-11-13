@@ -11,6 +11,8 @@ export interface RemediationRequest {
   buildCommand: string;
   /** Trusted regression test uploaded into E2B before baseline, included unchanged in the draft PR. */
   reproductionFixture?: { path: string; content: string };
+  /** GitHub issue opened for this incident. The pull request references it. */
+  issueUrl?: string;
 }
 
 export interface ProviderConfig {
@@ -44,6 +46,26 @@ export type RemediationResult =
       testOutput: string;
       buildOutput: string;
       mcpConfigured: boolean;
+      /** Set when the proof test failed before the patch and passed after it. */
+      verifiedRegression?: boolean;
+      sandboxId?: string;
+    }
+  | {
+      ok: true;
+      phase: 'awaiting_comment';
+      incidentId: string;
+      sandboxId: string;
+      question: string;
+      diagnosis: string;
+      testPath: string;
+      testOutput: string;
+    }
+  | {
+      ok: true;
+      phase: 'reply';
+      incidentId: string;
+      sandboxId: string;
+      reply: string;
     }
   | {
       ok: false;

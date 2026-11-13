@@ -3,6 +3,12 @@
 # Unlike the interactive Vectra image, this has no daemon, browser, VNC, or bundled secrets.
 FROM e2bdev/base:latest
 
+# Supercharge 1.4.22 links libdbus. The slim base image does not ship it.
+USER root
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libdbus-1-3 \
+    && rm -rf /var/lib/apt/lists/*
+
 USER user
 WORKDIR /home/user
 
@@ -11,9 +17,9 @@ RUN curl -fsSL https://bun.com/install -o /tmp/nexathon-bun-install.sh \
     && bash /tmp/nexathon-bun-install.sh bun-v1.3.11 \
     && rm -f /tmp/nexathon-bun-install.sh
 
-RUN curl -fsSL https://www.superchargeai.in/install.sh -o /tmp/nexathon-supercharge-install.sh \
-    && SUPERCHARGE_VERSION=1.3.30 \
-       SUPERCHARGE_GITHUB_REPO=iotserver24/supercharge-releases \
+RUN curl -fsSL https://raw.githubusercontent.com/supercharge-cli/supercharge-releases/main/scripts/install.sh -o /tmp/nexathon-supercharge-install.sh \
+    && SUPERCHARGE_VERSION=1.4.22 \
+       SUPERCHARGE_GITHUB_REPO=supercharge-cli/supercharge-releases \
        SUPERCHARGE_NO_MODIFY_PATH=1 \
        bash /tmp/nexathon-supercharge-install.sh \
     && rm -f /tmp/nexathon-supercharge-install.sh

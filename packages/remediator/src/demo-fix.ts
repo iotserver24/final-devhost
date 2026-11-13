@@ -42,7 +42,7 @@ const fix = await generateFixInE2B(request, provider);
 if (!fix.ok) {
   console.error(JSON.stringify({ incidentId: fix.incidentId, reason: fix.reason, message: fix.message, evidence: fix.evidence }, null, 2));
   process.exitCode = 1;
-} else {
+} else if ('patch' in fix) {
   console.log(JSON.stringify({ incidentId: fix.incidentId, changedFiles: fix.changedFiles, mcpConfigured: fix.mcpConfigured, tests: 'passed', build: 'passed' }, null, 2));
   if (publish) {
     const pr = await publishDraftPr(request, fix);
@@ -50,4 +50,9 @@ if (!fix.ok) {
   } else {
     console.log('No PR opened. Pass --publish with a repository-scoped GH_TOKEN to publish a new verified run.');
   }
+} else if (fix.phase === 'awaiting_comment') {
+  console.log(JSON.stringify({ incidentId: fix.incidentId, phase: fix.phase, sandboxId: fix.sandboxId, question: fix.question, testPath: fix.testPath }, null, 2));
+  console.log('Sandbox is paused. A repository comment has to choose the method before a pull request is opened.');
+} else {
+  console.log(JSON.stringify({ incidentId: fix.incidentId, phase: fix.phase, sandboxId: fix.sandboxId, reply: fix.reply }, null, 2));
 }

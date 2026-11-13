@@ -9,7 +9,7 @@
     "smoke:e2b": "bun run src/smoke.ts",
     "smoke:fixture": "bun run src/fixture-smoke.ts",
     "demo:fix": "bun run src/demo-fix.ts",
-    "template:build": "e2b template create nexathon-remediator --path e2b-template --dockerfile Dockerfile --cpu-count 8 --memory-mb 8192"
+    "template:build": "e2b template create devhost-fix --path e2b-template --dockerfile Dockerfile --cpu-count 16 --memory-mb 16384"
   },
   "dependencies": {
     "e2b": "^2.59.0"

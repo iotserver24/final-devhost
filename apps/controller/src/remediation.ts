@@ -63,9 +63,14 @@ export function dispatchRun(
       }
       const result = await generateFixInE2B(await requestFor(incident, config), config.provider, {
         onEvent: (event) => hub.append(runId, event),
+        phase: 'diagnose',
       });
-      if (result.ok) {
+      if (result.ok && 'phase' in result && result.phase === 'awaiting_comment') {
+        hub.finish(runId, 'completed', `Paused after a failing test at ${result.testPath}. Waiting for a repository comment before the fix.`);
+      } else if (result.ok && 'changedFiles' in result) {
         hub.finish(runId, 'completed', `Verified a patch touching ${result.changedFiles.length} file(s). Publishing a draft PR is a separate human action.`);
+      } else if (result.ok) {
+        hub.finish(runId, 'completed', 'The sandbox paused after the repository comment.');
       } else {
         hub.finish(runId, 'failed', `Fix attempt stopped: ${result.reason}. No PR or production action occurred.`);
       }

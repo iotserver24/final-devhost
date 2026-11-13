@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { generateFixInE2B, publishDraftPr, type ProviderConfig, type RemediationRequest } from '@nexathon/remediator';
 import { notifyIncident, redact, resolveSmtpConfig, type Incident } from '@nexathon/notifier';
 import { githubCredentials } from './github-app';
+import { commentOnIssue, openIncidentIssue } from './github-issue';
 import type { IncidentStore } from './incident-store';
 import type { ActivityHub } from './activity';
 import type { MonitorActions, RemediationOutcome } from './monitor';
@@ -86,7 +87,31 @@ async function runRemediation(incident: Incident, config: RemediationConfig, hub
   try {
     const fix = await generateFixInE2B(request, config.provider, {
       onEvent: activity => { if (run) hub?.append(run.id, activity); },
+      phase: 'diagnose',
     });
+    if (fix.ok && 'phase' in fix && fix.phase === 'awaiting_comment') {
+      const token = process.env.GH_TOKEN;
+      if (!token) {
+        if (run) hub?.finish(run.id, 'failed', 'The failing test is ready, but no GitHub token was available to open the issue.');
+        return { ok: false, message: 'The failing test is ready, but GitHub could not open the issue.' };
+      }
+      const issue = await openIncidentIssue(config.repository, token, {
+        incidentId: incident.id,
+        diagnosis: fix.diagnosis,
+        question: fix.question,
+        testPath: fix.testPath,
+      });
+      if (run) hub?.finish(run.id, 'completed', `Paused for a comment on issue #${issue.number}.`);
+      return {
+        ok: true,
+        kind: 'waiting',
+        actionUrl: issue.url,
+        sandboxId: fix.sandboxId,
+        issueNumber: issue.number,
+        message: `Waiting for a comment on issue #${issue.number} before writing the fix. sandbox=${fix.sandboxId}`,
+        evidence: [`Regression test ${fix.testPath} fails on the broken revision.`],
+      };
+    }
     if (!fix.ok) {
       if (run) hub?.finish(run.id, 'failed', fix.message);
       return {
@@ -95,17 +120,102 @@ async function runRemediation(incident: Incident, config: RemediationConfig, hub
         ...(fix.evidence ? { evidence: [redact(fix.evidence)] } : {}),
       };
     }
+    if (!('patch' in fix)) {
+      if (run) hub?.finish(run.id, 'failed', 'The diagnosis did not leave a failing test.');
+      return { ok: false, message: 'The diagnosis stopped before a failing regression test was ready.' };
+    }
     const draftPr = await publishDraftPr(request, fix);
     if (run) hub?.finish(run.id, 'completed', `Fix pull request published: ${draftPr.url}`);
     return {
       ok: true,
+      kind: 'fix',
       actionUrl: draftPr.url,
+      sandboxId: fix.sandboxId,
+      verifiedRegression: fix.verifiedRegression === true,
       message: 'Verified patch published as an open pull request for review.',
-      evidence: ['Reproduction failed before patching; targeted tests and build passed afterward.'],
+      evidence: ['The regression test failed before the patch and passed after it. The pull request references the incident issue.'],
     };
   } catch (error) {
     if (run) hub?.finish(run.id, 'failed', 'Remediation failed before a pull request was opened.');
     return { ok: false, message: 'Remediation failed safely; no PR was created.', evidence: [redact(String(error))] };
+  }
+}
+
+export async function resumeRemediation(
+  incident: Incident,
+  comment: string,
+  sandboxId: string,
+  issue: { number?: number; url?: string },
+  phase: 'fix' | 'reply',
+  config: RemediationConfig,
+  hub?: ActivityHub,
+  settings?: Pick<IncidentStore, 'readSettings'>,
+): Promise<RemediationOutcome> {
+  if (settings) {
+    try {
+      const credentials = await githubCredentials(settings);
+      if (credentials.write) process.env.GH_TOKEN = credentials.write;
+      if (credentials.read) config.provider.githubReadToken = credentials.read;
+    } catch (error) {
+      return { ok: false, message: 'Remediation stopped safely: GitHub app token was not issued.', evidence: [redact(String(error))] };
+    }
+  }
+  if (!incident.commitSha) return { ok: false, message: 'Incident has no commit SHA; the paused sandbox was not resumed.' };
+  const request: RemediationRequest = {
+    incidentId: incident.id,
+    repository: config.repository,
+    commitSha: incident.commitSha,
+    evidence: incident.evidence.slice(-20).map(line => line.slice(0, 1000)),
+    ...(incident.runtimeLogs ? { runtimeLogs: incident.runtimeLogs } : {}),
+    setupCommand: config.setupCommand,
+    reproduceCommand: config.reproduceCommand,
+    testCommand: config.testCommand,
+    buildCommand: config.buildCommand,
+    ...(issue.url ? { issueUrl: issue.url } : {}),
+  };
+  const run = hub?.create({ incidentId: incident.id, source: 'ai' });
+  if (run) hub?.markRunning(run.id);
+  try {
+    const fix = await generateFixInE2B(request, config.provider, {
+      onEvent: activity => { if (run) hub?.append(run.id, activity); },
+      phase,
+      sandboxId,
+      comment,
+      ...(issue.url ? { issueUrl: issue.url } : {}),
+    });
+    if (fix.ok && 'phase' in fix && fix.phase === 'reply') {
+      const token = process.env.GH_TOKEN;
+      if (token && issue.number) await commentOnIssue(config.repository, token, issue.number, `Incident \`${incident.id}\`\n\n${fix.reply}`).catch(() => undefined);
+      if (run) hub?.finish(run.id, 'completed', 'Replied on the incident issue and paused again.');
+      return { ok: true, kind: 'reply', sandboxId: fix.sandboxId, issueNumber: issue.number, message: fix.reply };
+    }
+    if (!fix.ok) {
+      if (run) hub?.finish(run.id, 'failed', fix.message);
+      return { ok: false, message: `The follow-up stopped before a verified fix. ${fix.message}`, ...(fix.evidence ? { evidence: [redact(fix.evidence)] } : {}) };
+    }
+    if (!('patch' in fix)) {
+      if (run) hub?.finish(run.id, 'failed', 'The follow-up did not produce a verified fix.');
+      return { ok: false, message: 'The follow-up stopped before a verified fix.' };
+    }
+    const draftPr = await publishDraftPr(request, fix);
+    const token = process.env.GH_TOKEN;
+    if (token && issue.number) {
+      await commentOnIssue(config.repository, token, issue.number, `Incident \`${incident.id}\` is fixed in ${draftPr.url}.`).catch(() => undefined);
+    }
+    if (run) hub?.finish(run.id, 'completed', `Fix pull request published: ${draftPr.url}`);
+    return {
+      ok: true,
+      kind: 'fix',
+      actionUrl: draftPr.url,
+      sandboxId: fix.sandboxId,
+      issueNumber: issue.number,
+      verifiedRegression: fix.verifiedRegression === true,
+      message: `Verified patch published as ${draftPr.url}. It references issue #${issue.number ?? 'unknown'}.`,
+      evidence: ['The regression test failed before the patch and passed after it.'],
+    };
+  } catch (error) {
+    if (run) hub?.finish(run.id, 'failed', 'The follow-up failed before a verified fix.');
+    return { ok: false, message: 'The follow-up failed before a verified fix.', evidence: [redact(String(error))] };
   }
 }
 

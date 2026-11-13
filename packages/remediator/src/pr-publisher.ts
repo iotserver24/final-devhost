@@ -69,7 +69,7 @@ async function run(file: string, args: string[], cwd: string, env: NodeJS.Proces
  */
 export async function publishDraftPr(request: RemediationRequest, fix: RemediationResult): Promise<DraftPrResult> {
   validateRequest(request);
-  if (!fix.ok || fix.incidentId !== request.incidentId || fix.baseSha.toLowerCase() !== request.commitSha.toLowerCase()) {
+  if (!fix.ok || !('patch' in fix) || fix.incidentId !== request.incidentId || fix.baseSha.toLowerCase() !== request.commitSha.toLowerCase()) {
     throw new Error('Only a verified fix for the same incident and base revision can be published');
   }
   const patchedPaths = validatePatch(fix.patch);
@@ -82,13 +82,16 @@ export async function publishDraftPr(request: RemediationRequest, fix: Remediati
   const patchFile = join(directory, 'fix.patch');
   try {
     const existing = await run('gh', ['pr', 'list', '--repo', request.repository, '--head', branch, '--state', 'all', '--json', 'url', '--jq', '.[0].url // ""'], directory, env);
-    if (existing) return { branch, url: existing };
-
     const repoDir = join(directory, 'repo');
     await run('git', ['clone', '--no-checkout', `https://github.com/${request.repository}.git`, repoDir], directory, env);
-    await run('git', ['checkout', '-B', branch, request.commitSha], repoDir, env);
-    const sha = await run('git', ['rev-parse', 'HEAD'], repoDir, env);
-    if (sha.toLowerCase() !== fix.baseSha.toLowerCase()) throw new Error('Repository base SHA changed unexpectedly');
+    if (existing) {
+      await run('git', ['fetch', 'origin', branch], repoDir, env);
+      await run('git', ['checkout', '-B', branch, request.commitSha], repoDir, env);
+    } else {
+      await run('git', ['checkout', '-B', branch, request.commitSha], repoDir, env);
+      const sha = await run('git', ['rev-parse', 'HEAD'], repoDir, env);
+      if (sha.toLowerCase() !== fix.baseSha.toLowerCase()) throw new Error('Repository base SHA changed unexpectedly');
+    }
     await writeFile(patchFile, fix.patch, { mode: 0o600 });
     await run('git', ['apply', '--check', patchFile], repoDir, env);
     await run('git', ['apply', '--index', patchFile], repoDir, env);
@@ -100,9 +103,13 @@ export async function publishDraftPr(request: RemediationRequest, fix: Remediati
     validateChangedFiles(staged.split('\n').filter(Boolean));
     await run('git', ['-c', 'user.name=Nexathon Remediation Agent', '-c', 'user.email=agent@users.noreply.github.com', 'commit', '-m', `fix: remediate incident ${request.incidentId}`], repoDir, env);
     // Git invokes gh as a credential helper. The token is in the process env, not the URL, patch, or child arguments.
-    await run('git', ['-c', 'credential.helper=!gh auth git-credential', 'push', 'origin', `HEAD:refs/heads/${branch}`], repoDir, env);
+    const pushRef = existing ? `+HEAD:refs/heads/${branch}` : `HEAD:refs/heads/${branch}`;
+    await run('git', ['-c', 'credential.helper=!gh auth git-credential', 'push', 'origin', pushRef], repoDir, env);
+    if (existing) return { branch, url: existing };
     const body = [
-      `Automated fix for incident \`${request.incidentId}\`. The pull request is open for review. Nothing is merged automatically.`,
+      `Automated fix for incident \`${request.incidentId}\`. This pull request references that incident${request.issueUrl ? ` and ${request.issueUrl}` : ''}. Nothing is merged automatically.`,
+      '',
+      'The regression test was written to fail on the broken revision and pass after this patch. The controller checked the current deployment against the immediate previous deployment on the same route before any rollback.',
       '',
       `Base revision: \`${fix.baseSha}\``,
       `GitHub MCP configured during diagnosis: ${fix.mcpConfigured ? 'yes' : 'no'}`,

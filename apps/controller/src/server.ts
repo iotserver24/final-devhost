@@ -10,10 +10,11 @@ import { startPollingWorker, type PollingWorker, type WatchTarget } from './work
 import { ensureLegacyWatchedService, parseWatchedService, type WatchedService } from './services';
 import { VercelProvider } from './vercel-provider';
 import { CoolifyProvider, RailwayProvider, RenderProvider } from './platform-providers';
-import { checkProject, runtimeLogSignal, type DeploymentProvider, type DeploymentSummary, type RuntimeLog } from './monitor';
-import { createControllerActions, type RemediationConfig } from './actions';
+import { applyRemediationOutcome, checkProject, runtimeLogSignal, type DeploymentProvider, type DeploymentSummary, type RuntimeLog } from './monitor';
+import { createControllerActions, resumeRemediation, type RemediationConfig } from './actions';
 import { applyStoredSettings, createSettingsApi } from './settings';
 import { finishRemediation } from './monitor';
+import { awaitingComment, awaitingMessage, authorMayComment, coldSandbox, planResume, readOwnerComment, selectFreshComments } from './comment-gate';
 import { startLocalEngine, type LocalEngine } from './local-engine';
 import { policyFromEnvironment } from './classify';
 import { posthogFromEnvironment } from './posthog';
@@ -557,6 +558,164 @@ function startLocalDemoMonitor(): void {
   console.info(`Local demo monitor started against ${base}.`);
 }
 
+function commandAllowlist(): string[] {
+  return (process.env.GITHUB_COMMAND_ALLOWLIST ?? '').split(',').map(item => item.trim()).filter(Boolean);
+}
+
+function remediationRepository(): string {
+  return process.env.REMEDIATOR_ALLOWED_REPOSITORY || process.env.REMEDIATOR_REPOSITORY || remediation?.repository || '';
+}
+
+const unavailableProvider: DeploymentProvider = {
+  async getProductionDeployment() { return null; },
+  async getPreviousDeployment() { return null; },
+  async probeImmutableDeployment() { return { result: 'unknown', evidence: 'No deployment provider was available for the latest-commit check.' }; },
+  async rollbackProductionTo() { throw new Error('No deployment provider was available.'); },
+  async probeProduction() { return { result: 'unknown', evidence: 'No deployment provider was available for the latest-commit check.' }; },
+};
+
+async function providerForIncident(projectId: string): Promise<DeploymentProvider | undefined> {
+  if (!monitorConfig) return undefined;
+  const services = await store.listWatchedServices();
+  const service = services.find(item => item.enabled && item.vercelProjectId === projectId);
+  if (service) return providerForService(monitorConfig, service);
+  if (projectId === monitorConfig.projectId) return monitorConfig.provider;
+  return undefined;
+}
+
+function rearmCommentWait(incident: { status: string; evidence: string[]; events: { at: string; type: string; message: string }[] }, issueNumber: number | undefined, sandboxId: string, message: string): void {
+  incident.status = 'needs_human';
+  incident.evidence.push(message.slice(0, 600));
+  const at = new Date().toISOString();
+  incident.events.push({ at, type: 'remediation_failed', message: message.slice(0, 600) });
+  if (issueNumber) incident.events.push({ at, type: 'awaiting_comment', message: awaitingMessage(issueNumber, sandboxId) });
+}
+
+/** Resume the paused sandbox for one authorized comment. The lock is released when this settles. */
+async function continuePausedIncident(input: {
+  repository: string;
+  number: number;
+  onPullRequest: boolean;
+  author: string;
+  body: string;
+  lockKey: string;
+}): Promise<void> {
+  let plan = planResume(await store.list(200), { number: input.number, onPullRequest: input.onPullRequest });
+  try {
+    if (!plan || !remediation) return;
+    const incident = plan.incident;
+    incident.status = 'remediating';
+    incident.events.push({
+      at: new Date().toISOString(),
+      type: 'review_resumed',
+      message: `Comment from ${input.author} resumed sandbox ${plan.sandboxId}.`,
+    });
+    await store.save(incident);
+    const issueUrl = incident.actionUrl?.includes('/issues/')
+      ? incident.actionUrl
+      : `https://github.com/${input.repository}/issues/${plan.issueNumber ?? input.number}`;
+    const result = await resumeRemediation(
+      incident,
+      input.body,
+      plan.sandboxId,
+      { ...(plan.issueNumber ? { number: plan.issueNumber } : {}), url: issueUrl },
+      plan.phase,
+      remediation,
+      hub,
+      store,
+    );
+    if (!result.ok) {
+      rearmCommentWait(incident, plan.issueNumber, plan.sandboxId, result.message);
+      await store.save(incident);
+      return;
+    }
+    const provider = await providerForIncident(incident.projectId);
+    await applyRemediationOutcome(incident, result, {
+      projectId: incident.projectId,
+      allowlistedProjectIds: new Set([incident.projectId]),
+      probePath: incident.probePath || monitorConfig?.probePath || '/api/tasks',
+      provider: provider ?? unavailableProvider,
+      store,
+      actions,
+    });
+    plan = null;
+  } catch {
+    if (plan && !plan.incident.events.some(item => item.type === 'draft_pr' || item.type === 'cold')) {
+      rearmCommentWait(plan.incident, plan.issueNumber, plan.sandboxId, 'The follow-up failed before a verified fix.');
+      try { await store.save(plan.incident); } catch { /* The failure is already logged below. */ }
+    }
+    console.error('Comment resume failed before a verified fix.');
+  } finally {
+    followupLock.release(input.lockKey);
+  }
+}
+
+let commentToken: { value: string; until: number } | undefined;
+let commentPollRunning = false;
+
+async function pollIncidentComments(): Promise<void> {
+  if (commentPollRunning || !remediation) return;
+  commentPollRunning = true;
+  try {
+    const incidents = await store.list(200);
+    const gates: { number: number; sandboxId: string; at: string; onPullRequest: boolean }[] = [];
+    for (const incident of incidents) {
+      const waiting = awaitingComment(incident);
+      if (waiting) {
+        gates.push({ number: waiting.issueNumber, sandboxId: waiting.sandboxId, at: waiting.at, onPullRequest: false });
+        continue;
+      }
+      const cold = coldSandbox(incident);
+      if (!cold) continue;
+      if (cold.issueNumber) gates.push({ number: cold.issueNumber, sandboxId: cold.sandboxId, at: cold.at, onPullRequest: false });
+      const pull = incident.actionUrl?.match(/\/pull\/(\d+)/);
+      if (pull) gates.push({ number: Number(pull[1]), sandboxId: cold.sandboxId, at: cold.at, onPullRequest: true });
+    }
+    if (gates.length === 0) return;
+    if (!commentToken || commentToken.until <= Date.now()) {
+      const credentials = await githubCredentials(store);
+      const value = credentials.write ?? credentials.read;
+      if (!value) return;
+      commentToken = { value, until: Date.now() + 30 * 60_000 };
+    }
+    if (!commentToken) return;
+    const token = commentToken.value;
+    const repository = remediationRepository();
+    const allowedAuthors = commandAllowlist();
+    for (const gate of gates) {
+      const response = await fetch(`https://api.github.com/repos/${repository}/issues/${gate.number}/comments?since=${encodeURIComponent(gate.at)}&per_page=30`, {
+        headers: { Accept: 'application/vnd.github+json', Authorization: `Bearer ${token}`, 'User-Agent': 'sentinel' },
+      });
+      if (response.status === 401) {
+        commentToken = undefined;
+        return;
+      }
+      if (!response.ok) continue;
+      const fresh = selectFreshComments(await response.json(), gate.at, (author, userType) => authorMayComment(author, userType, repository, allowedAuthors));
+      const next = fresh[0];
+      if (!next) continue;
+      const lockKey = `sandbox:${gate.sandboxId}`;
+      if (!followupLock.tryAcquire(lockKey)) continue;
+      if (!followupLedger.claim(`comment:${next.id}`)) {
+        followupLock.release(lockKey);
+        continue;
+      }
+      void continuePausedIncident({
+        repository,
+        number: gate.number,
+        onPullRequest: gate.onPullRequest,
+        author: next.author,
+        body: next.body,
+        lockKey,
+      });
+    }
+  } catch {
+    commentToken = undefined;
+  } finally {
+    commentPollRunning = false;
+  }
+}
+
 async function integrationRoutes(request: Request, settingsStore: typeof store): Promise<Response | null> {
   const url = new URL(request.url);
   const dashboard = dashboardOrigin();
@@ -576,10 +735,42 @@ async function integrationRoutes(request: Request, settingsStore: typeof store):
     }
     let parsed: unknown;
     try { parsed = JSON.parse(body); } catch { return Response.json({ error: 'Invalid webhook payload.' }, { status: 400 }); }
+    const owner = readOwnerComment(parsed, {
+      allowedRepository: remediationRepository(),
+      ...(process.env.GITHUB_INSTALLATION_ID ? { allowedInstallationId: process.env.GITHUB_INSTALLATION_ID } : {}),
+      allowedAuthors: commandAllowlist(),
+    });
+    if (owner.kind === 'comment') {
+      const plan = planResume(await store.list(200), { number: owner.comment.number, onPullRequest: owner.comment.onPullRequest });
+      if (plan) {
+        const lockKey = `sandbox:${plan.sandboxId}`;
+        if (!followupLock.tryAcquire(lockKey)) {
+          return Response.json({ ok: false, ignored: 'a run is already active for this sandbox' }, { status: 202 });
+        }
+        if (!followupLedger.claim(`comment:${owner.comment.commentId}`)) {
+          followupLock.release(lockKey);
+          return Response.json({ ok: true, ignored: 'duplicate comment' }, { status: 202 });
+        }
+        auditLog.record({ actor: 'system', action: 'pr.followup', target: lockKey, outcome: 'allowed', detail: `${plan.phase} resumed by ${owner.comment.author}` });
+        void continuePausedIncident({
+          repository: owner.comment.repository,
+          number: owner.comment.number,
+          onPullRequest: owner.comment.onPullRequest,
+          author: owner.comment.author,
+          body: owner.comment.body,
+          lockKey,
+        });
+        return Response.json({ ok: true, accepted: { repository: owner.comment.repository, issue: owner.comment.number, phase: plan.phase }, executed: Boolean(remediation) }, { status: 202 });
+      }
+      if (!owner.comment.onPullRequest) {
+        auditLog.record({ actor: 'system', action: 'pr.followup', target: `${owner.comment.repository}#${owner.comment.number}`, outcome: 'denied', detail: 'no paused incident for this issue' });
+        return Response.json({ ok: true, ignored: 'no paused incident for this issue' }, { status: 202 });
+      }
+    }
     const outcome = readCommentWebhook(parsed, {
-      allowedRepository: process.env.REMEDIATOR_ALLOWED_REPOSITORY || process.env.REMEDIATOR_REPOSITORY || '',
+      allowedRepository: remediationRepository(),
       allowedInstallationId: process.env.GITHUB_INSTALLATION_ID,
-      allowedAuthors: (process.env.GITHUB_COMMAND_ALLOWLIST ?? '').split(',').map(item => item.trim()).filter(Boolean),
+      allowedAuthors: commandAllowlist(),
       mention: process.env.GITHUB_COMMAND_MENTION || '@sentinel',
     });
     if (outcome.kind === 'ignored') {
@@ -930,12 +1121,14 @@ if (!process.env.NEXATHON_RUN_TOKEN) {
 
 if (monitorConfig) launchMonitor(monitorConfig);
 startLocalDemoMonitor();
+if (remediation) setInterval(() => { void pollIncidentComments(); }, 15_000);
 
 void (async () => {
   if (!actions.remediate) return;
   const open = await store.list(100);
   for (const incident of open) {
     if (incident.status !== 'needs_human') continue;
+    if (awaitingComment(incident)) continue;
     if (incident.events.some(item => item.type === 'remediation_started' || item.type === 'draft_pr')) continue;
     incident.events.push({
       at: new Date().toISOString(),

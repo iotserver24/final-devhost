@@ -13,7 +13,7 @@ if (!process.env.E2B_API_KEY) {
     console.log(result.stdout.trim());
     if (process.env.SMOKE_ASSERT_PREINSTALLED === '1') {
       const versions = await sandbox.commands.run('"$HOME/.bun/bin/bun" --version && "$HOME/.local/bin/supercharge" --version', { timeoutMs: 15_000 });
-      if (!versions.stdout.includes('1.3.11') || !versions.stdout.includes('supercharge 1.3.30')) {
+      if (!versions.stdout.includes('1.3.11') || !versions.stdout.includes('supercharge 1.4.22')) {
         throw new Error('Template lacks the pinned Bun/Supercharge versions');
       }
       console.log(`preinstalled tools: ${versions.stdout.trim().replaceAll('\n', ', ')}`);
@@ -46,7 +46,7 @@ if (!process.env.E2B_API_KEY) {
     }
     if (process.env.SMOKE_INSTALL_SUPERCHARGE === '1') {
       const install = await sandbox.commands.run(
-        `curl -fsSL https://www.superchargeai.in/install.sh -o /tmp/supercharge-install.sh && SUPERCHARGE_VERSION=1.3.30 SUPERCHARGE_GITHUB_REPO=iotserver24/supercharge-releases SUPERCHARGE_NO_MODIFY_PATH=1 bash /tmp/supercharge-install.sh && "$HOME/.local/bin/supercharge" --version && "$HOME/.local/bin/supercharge" --help | grep -E -- '--prompt-file|--always-approve|--max-turns|--output-format|--no-subagents|--disable-web-search'`,
+        `curl -fsSL https://raw.githubusercontent.com/supercharge-cli/supercharge-releases/main/scripts/install.sh -o /tmp/supercharge-install.sh && SUPERCHARGE_VERSION=1.4.22 SUPERCHARGE_GITHUB_REPO=supercharge-cli/supercharge-releases SUPERCHARGE_NO_MODIFY_PATH=1 bash /tmp/supercharge-install.sh && "$HOME/.local/bin/supercharge" --version && "$HOME/.local/bin/supercharge" --help | grep -E -- '--prompt-file|--always-approve|--max-turns|--output-format|--no-subagents|--disable-web-search'`,
         { timeoutMs: 90_000 },
       );
       console.log(install.stdout.trim());

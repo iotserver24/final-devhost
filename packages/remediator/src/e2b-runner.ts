@@ -6,7 +6,26 @@ import type { ProviderConfig, RemediationFailure, RemediationRequest, Remediatio
 import { allowedPathPrefix, shellQuote, truncate, validateChangedFiles, validateProvider, validateRequest } from './validation.js';
 
 const REPO_DIR = '/home/user/nexathon';
-const SC_VERSION = '1.3.30'; // Latest verified published release at initial implementation.
+
+/** Leave the VM paused so a later repo comment can resume it. Kill only if this SDK cannot pause. */
+async function coldStop(sandbox: Sandbox): Promise<void> {
+  const pausable = sandbox as Sandbox & { betaPause?: () => Promise<unknown>; pause?: () => Promise<unknown> };
+  try {
+    if (typeof pausable.betaPause === 'function') {
+      await pausable.betaPause();
+      return;
+    }
+    if (typeof pausable.pause === 'function') {
+      await pausable.pause();
+      return;
+    }
+  } catch {
+    // A failed pause still has to release the running VM.
+  }
+  await sandbox.kill().catch(() => undefined);
+}
+const SC_VERSION = '1.4.22'; // Latest release on supercharge-cli/supercharge-releases.
+const SC_REPO = 'supercharge-cli/supercharge-releases';
 const BUN_VERSION = '1.3.11'; // Team's pinned Bun runtime; update together.
 const MAX_PATCH_BYTES = 256 * 1024;
 
@@ -47,7 +66,14 @@ async function checked(sandbox: Sandbox, cmd: string, timeoutMs: number, cwd?: s
  * verify tests/build, and return a data-only patch. No GitHub write token enters E2B.
  */
 export async function generateFixInE2B(request: RemediationRequest, provider: ProviderConfig,
-  options?: { onEvent?: (event: RemediationActivity) => void | Promise<void> }): Promise<RemediationResult> {
+  options?: {
+    onEvent?: (event: RemediationActivity) => void | Promise<void>;
+    /** diagnose writes the failing test and pauses. fix and reply resume that sandbox after a comment. */
+    phase?: 'diagnose' | 'fix' | 'reply';
+    sandboxId?: string;
+    comment?: string;
+    issueUrl?: string;
+  }): Promise<RemediationResult> {
   validateRequest(request);
   validateProvider(provider);
   if (!process.env.E2B_API_KEY) throw new Error('E2B_API_KEY is required on the controller');
@@ -59,18 +85,25 @@ export async function generateFixInE2B(request: RemediationRequest, provider: Pr
     catch { /* Dashboard transport failure must not abort remediation. */ }
   };
   let sandbox: Sandbox | undefined;
+  let paused = false;
+  const phase = options?.phase ?? 'diagnose';
+  const keep = phase === 'diagnose' || phase === 'fix' || phase === 'reply';
   try {
-    await emit('sandbox', 'stage', 'Starting isolated E2B sandbox');
-    const options = {
-      timeoutMs: 600_000,
-      metadata: { purpose: 'nexathon-remediation', incident: request.incidentId },
-    };
-    sandbox = await Sandbox.create(template, options);
-    await emit('checkout', 'stage', 'Cloning the allowlisted repository at the incident revision');
-    await checked(sandbox, `git clone --no-checkout --filter=blob:none ${shellQuote(`https://github.com/${request.repository}.git`)} ${REPO_DIR}`, 90_000);
-    await checked(sandbox, `git checkout --detach ${shellQuote(request.commitSha)}`, 60_000, REPO_DIR);
+    if ((phase === 'fix' || phase === 'reply') && options?.sandboxId) {
+      await emit('sandbox', 'stage', `Resuming paused sandbox ${options.sandboxId}`);
+      sandbox = await Sandbox.connect(options.sandboxId, { timeoutMs: 600_000 });
+    } else {
+      await emit('sandbox', 'stage', 'Starting isolated E2B sandbox');
+      sandbox = await Sandbox.create(template, {
+        timeoutMs: 600_000,
+        metadata: { purpose: 'devhost-fix', incident: request.incidentId, template: template },
+      });
+      await emit('checkout', 'stage', 'Cloning the allowlisted repository at the incident revision');
+      await checked(sandbox, `git clone --no-checkout --filter=blob:none ${shellQuote(`https://github.com/${request.repository}.git`)} ${REPO_DIR}`, 90_000);
+      await checked(sandbox, `git checkout --detach ${shellQuote(request.commitSha)}`, 60_000, REPO_DIR);
+    }
     const head = (await checked(sandbox, 'git rev-parse HEAD', 10_000, REPO_DIR)).stdout.trim();
-    if (head.toLowerCase() !== request.commitSha.toLowerCase()) throw new Error('Cloned revision does not match incident SHA');
+    if (phase === 'diagnose' && head.toLowerCase() !== request.commitSha.toLowerCase()) throw new Error('Cloned revision does not match incident SHA');
 
     await emit('setup', 'stage', 'Preparing pinned Bun and sample dependencies');
     // Bun is used for dependency setup, tests, and build in the target repo.
@@ -108,16 +141,24 @@ export async function generateFixInE2B(request: RemediationRequest, provider: Pr
       : 'Baseline failed as expected; agent will inspect the code and logs before fixing');
 
     await checked(sandbox,
-      `if "$HOME/.local/bin/supercharge" --version 2>/dev/null | grep -q '^supercharge ${SC_VERSION} '; then "$HOME/.local/bin/supercharge" --version; else curl -fsSL https://www.superchargeai.in/install.sh -o /tmp/supercharge-install.sh && SUPERCHARGE_VERSION=${SC_VERSION} SUPERCHARGE_GITHUB_REPO=iotserver24/supercharge-releases SUPERCHARGE_NO_MODIFY_PATH=1 bash /tmp/supercharge-install.sh && "$HOME/.local/bin/supercharge" --version; fi`,
+      `if "$HOME/.local/bin/supercharge" --version 2>/dev/null | grep -q '^supercharge ${SC_VERSION} '; then "$HOME/.local/bin/supercharge" --version; else curl -fsSL https://raw.githubusercontent.com/${SC_REPO}/main/scripts/install.sh -o /tmp/supercharge-install.sh && SUPERCHARGE_VERSION=${SC_VERSION} SUPERCHARGE_GITHUB_REPO=${SC_REPO} SUPERCHARGE_NO_MODIFY_PATH=1 bash /tmp/supercharge-install.sh && "$HOME/.local/bin/supercharge" --version; fi`,
       90_000);
     await sandbox.files.write('/home/user/.supercharge/config.toml', superchargeConfig(provider));
     await checked(sandbox, 'chmod 700 /home/user/.supercharge && chmod 600 /home/user/.supercharge/config.toml', 10_000);
-    await sandbox.files.write('/home/user/incident-prompt.txt', remediationPrompt(request, { baselinePassed, regressionTestPath }));
+    await sandbox.files.write('/home/user/incident-prompt.txt', remediationPrompt(request, {
+      baselinePassed, regressionTestPath, phase,
+      ...(options?.comment ? { comment: options.comment } : {}),
+      ...(options?.issueUrl ? { issueUrl: options.issueUrl } : {}),
+    }));
     const envs = { GITHUB_READ_TOKEN: provider.githubReadToken };
     const parser = createAgentActivityParser((kind, message) => { void emit('agent', kind, message); },
       (text) => redacted(text, provider, 1_000_000));
     let diagnosticsNoted = false;
-    await emit('agent', 'stage', 'Supercharge is diagnosing and editing in E2B');
+    await emit('agent', 'stage', phase === 'diagnose'
+      ? `Supercharge ${SC_VERSION} is finding the error and writing the failing test`
+      : phase === 'reply'
+        ? `Supercharge ${SC_VERSION} is answering the repository comment`
+        : `Supercharge ${SC_VERSION} is applying the fix and proving the test`);
     const agent = await command(sandbox,
       'export PATH="$HOME/.bun/bin:$HOME/.local/bin:$PATH"; supercharge --cwd /home/user/nexathon --prompt-file /home/user/incident-prompt.txt --always-approve --no-subagents --disable-web-search --output-format streaming-json',
       270_000, REPO_DIR, envs, {
@@ -126,6 +167,49 @@ export async function generateFixInE2B(request: RemediationRequest, provider: Pr
       });
     parser.finish();
     if (agent.exitCode !== 0) return failure(request, 'agent_failed', 'Supercharge failed before a verified patch was available', redacted(agent.stderr || agent.stdout, provider));
+    if (phase === 'diagnose') {
+      const preserved = new Map<string, string>();
+      const writtenTest = await sandbox.files.read(`${REPO_DIR}/${regressionTestPath}`).catch(() => '');
+      if (writtenTest) preserved.set(regressionTestPath, writtenTest);
+      if (request.reproductionFixture && protectedTest !== undefined) preserved.set(request.reproductionFixture.path, protectedTest);
+      const reset = await command(sandbox, `git reset --hard ${shellQuote(request.commitSha)} && git clean -fd`, 30_000, REPO_DIR);
+      if (reset.exitCode !== 0) return failure(request, 'sandbox_error', 'The diagnosis could not restore the incident revision before pausing');
+      for (const [relative, content] of preserved) {
+        const absolute = `${REPO_DIR}/${relative}`;
+        await command(sandbox, `mkdir -p ${shellQuote(absolute.slice(0, absolute.lastIndexOf('/')))}`, 10_000);
+        await sandbox.files.write(absolute, content);
+      }
+      const testFile = await command(sandbox, `test -s ${shellQuote(regressionTestPath)}`, 10_000, REPO_DIR);
+      if (testFile.exitCode !== 0) return failure(request, 'not_reproducible', 'The diagnosis did not leave a regression test that fails on the current source');
+      const proof = await command(sandbox, `export PATH="$HOME/.bun/bin:$PATH"; bun test ${shellQuote(regressionTestPath)}`, 120_000, REPO_DIR);
+      if (proof.exitCode === 0) return failure(request, 'not_reproducible', 'The new test passed on the broken source, so it does not prove the defect');
+      const question = await sandbox.files.read('/home/user/incident-question.txt').catch(() => 'Which fix should be applied?');
+      const diagnosis = await sandbox.files.read('/home/user/incident-diagnosis.txt').catch(() => 'The regression test fails on the checked-out revision.');
+      const sandboxId = sandbox.sandboxId;
+      await coldStop(sandbox);
+      paused = true;
+      await emit('sandbox', 'status', `Paused sandbox ${sandboxId} until a repository comment arrives`);
+      return {
+        ok: true,
+        phase: 'awaiting_comment',
+        incidentId: request.incidentId,
+        sandboxId,
+        question: redacted(question, provider, 2000),
+        diagnosis: redacted(diagnosis, provider, 4000),
+        testPath: regressionTestPath,
+        testOutput: redacted(`${proof.stdout}\n${proof.stderr}`, provider),
+      };
+    }
+    if (phase === 'reply') {
+      const reply = await sandbox.files.read('/home/user/incident-reply.txt').catch(() => '');
+      const dirty = await command(sandbox, 'git status --porcelain', 15_000, REPO_DIR);
+      if (!dirty.stdout.trim()) {
+        const sandboxId = sandbox.sandboxId;
+        await coldStop(sandbox);
+        paused = true;
+        return { ok: true, phase: 'reply', incidentId: request.incidentId, sandboxId, reply: redacted(reply || 'No code change was required.', provider, 4000) };
+      }
+    }
     if (request.reproductionFixture && protectedTest !== undefined) {
       const current = await sandbox.files.read(`${REPO_DIR}/${request.reproductionFixture.path}`);
       if (current !== protectedTest) return failure(request, 'unsafe_patch', 'Agent modified the regression test');
@@ -169,6 +253,10 @@ export async function generateFixInE2B(request: RemediationRequest, provider: Pr
     const tests = await command(sandbox, `export PATH="$HOME/.bun/bin:$PATH"; ${request.testCommand}`, 120_000, REPO_DIR);
     await emit('verification', 'tool_output', `Tests · exit ${tests.exitCode}\n${tests.stdout}\n${tests.stderr}`);
     if (tests.exitCode !== 0) return failure(request, 'test_failed', 'Project tests failed after the patch', redacted(tests.stderr || tests.stdout, provider));
+    if (phase === 'fix' || phase === 'reply') {
+      const proof = await command(sandbox, `export PATH="$HOME/.bun/bin:$PATH"; bun test ${shellQuote(regressionTestPath)}`, 120_000, REPO_DIR);
+      if (proof.exitCode !== 0) return failure(request, 'test_failed', 'The regression test written for this incident still fails after the patch', redacted(proof.stderr || proof.stdout, provider));
+    }
     const build = await command(sandbox, `export PATH="$HOME/.bun/bin:$PATH"; ${request.buildCommand}`, 120_000, REPO_DIR);
     await emit('verification', 'tool_output', `Build · exit ${build.exitCode}\n${build.stdout}\n${build.stderr}`);
     if (build.exitCode !== 0) return failure(request, 'build_failed', 'Project build failed after the patch', redacted(build.stderr || build.stdout, provider));
@@ -198,12 +286,17 @@ export async function generateFixInE2B(request: RemediationRequest, provider: Pr
       testOutput: redacted(`${repro.stdout}\n${tests.stdout}\n${tests.stderr}`, provider),
       buildOutput: redacted(`${build.stdout}\n${build.stderr}`, provider),
       mcpConfigured: Boolean(provider.githubReadToken),
+      verifiedRegression: phase === 'fix' || phase === 'reply',
+      sandboxId: sandbox.sandboxId,
     };
   } catch (error) {
     // Never surface command arguments or config files in error text.
     await emit('sandbox', 'status', 'Sandbox or verification failed; recording the fix attempt error');
     return failure(request, 'sandbox_error', 'Sandbox setup, execution, or verification failed', redacted(String(error), provider));
   } finally {
-    if (sandbox) await sandbox.kill().catch(() => undefined);
+    if (sandbox && !paused) {
+      if (phase === 'diagnose') await sandbox.kill().catch(() => undefined);
+      else await coldStop(sandbox);
+    }
   }
 }

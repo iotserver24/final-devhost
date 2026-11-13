@@ -70,13 +70,21 @@ function rolledBack(incident: Incident) {
   return incident.events.some(event => event.type === 'rollback_started' || event.type === 'rollback_completed');
 }
 
+function waitingOnComment(incident: Incident) {
+  const event = [...incident.events].reverse().find(item => item.type === 'awaiting_comment');
+  if (!event) return false;
+  return !incident.events.some(item => item.type === 'review_resumed' && item.at > event.at);
+}
+
 function actionSummary(incident: Incident) {
   const restored = rolledBack(incident);
+  const resumed = incident.events.some(item => item.type === 'review_resumed');
   if (incident.status === 'rolling_back') return 'Rolling production back to the previous deploy. The fix starts after that.';
-  if (incident.status === 'remediating' && restored) return 'Production was rolled back. The agent is fixing the bad commit and will open a pull request.';
-  if (incident.status === 'remediating') return 'The agent is fixing the bad commit and will open a pull request.';
-  if (incident.status === 'pr_opened' && restored) return 'Production was rolled back, then a fix pull request was opened. Nothing has been merged.';
-  if (incident.status === 'pr_opened') return 'A pull request is open for review. Nothing has been merged.';
+  if (incident.status === 'remediating' && resumed) return 'The repository comment arrived. The agent is applying that method, running the proof test, and will open a pull request only if the test passes.';
+  if (incident.status === 'remediating') return 'The agent is finding the error and writing a regression test that fails on the broken source. It pauses for a repository comment before the fix.';
+  if (waitingOnComment(incident)) return 'The failing test is written and the sandbox is paused. Comment on the GitHub issue to choose the method. The fix starts after that comment.';
+  if (incident.status === 'pr_opened' && restored) return 'Production was rolled back, then a fix pull request was opened. Nothing has been merged. The sandbox is paused.';
+  if (incident.status === 'pr_opened') return 'A pull request is open for review. Nothing has been merged. The sandbox is paused until a later comment.';
   if (incident.status === 'recovered' && restored) return 'Production was restored to the previous deploy. The fix follows that rollback.';
   if (incident.status === 'recovered') return 'Production recovery was verified after the guarded action.';
   if (incident.status === 'remediation_failed') return [...incident.events].reverse()
@@ -252,7 +260,9 @@ function Overview({ watch }: { watch: WatchState | null }) {
 }
 
 function Detail({ incident, watch }: { incident: Incident; watch: WatchState | null }) {
-  const actionLabel = incident.decision === 'fix_pr' ? 'Open pull request' : incident.decision === 'rollback' ? 'View rollback target' : 'View action';
+  const actionLabel = waitingOnComment(incident) || incident.actionUrl?.includes('/issues/')
+    ? 'Open GitHub issue'
+    : incident.decision === 'fix_pr' ? 'Open pull request' : incident.decision === 'rollback' ? 'View rollback target' : 'View action';
   const detected = incident.events.find(event => event.type === 'detected');
   const decision = incident.events.find(event => event.type === 'decision');
   return <main className="detail">
@@ -286,7 +296,7 @@ function Detail({ incident, watch }: { incident: Incident; watch: WatchState | n
     </section>
     {rolledBack(incident) && <ol className="rollback-steps">
       <li>Rollback — production moved back to the previous deploy.</li>
-      <li>{incident.status === 'pr_opened' ? 'Fix — a pull request is open for that bad commit.' : incident.status === 'remediation_failed' ? 'Fix — the latest attempt failed; see the timeline for details.' : incident.status === 'needs_human' ? 'Fix — waiting for the next automatic attempt.' : 'Fix — the agent is working on the bad commit.'}</li>
+      <li>{incident.status === 'pr_opened' ? 'Fix — a pull request is open for that bad commit.' : waitingOnComment(incident) ? 'Fix — paused until a comment on the GitHub issue.' : incident.status === 'remediation_failed' ? 'Fix — the latest attempt failed; see the timeline for details.' : incident.status === 'needs_human' ? 'Fix — waiting for the next automatic attempt.' : 'Fix — the agent is working on the bad commit.'}</li>
     </ol>}
     {(incident.decision === 'rollback' || rolledBack(incident)) && <p className="caveat">{rollbackCaveat}</p>}
     <EscalationBanner incident={incident} />
