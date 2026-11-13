@@ -29,10 +29,11 @@
     ]
   },
   "include": [
-    "next-env.d.ts",
     ".next/types/**/*.ts",
+    "next-env.d.ts",
     "src",
-    "tests"
+    "tests",
+    ".next-dev/types/**/*.ts"
   ],
   "exclude": [
     "node_modules"

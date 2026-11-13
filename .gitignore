@@ -10,6 +10,7 @@ node_modules/
 **/.vercel/
 .next/
 **/.next/
+**/.next-dev/
 dist/
 **/dist/
 coverage/

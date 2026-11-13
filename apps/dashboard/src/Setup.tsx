@@ -36,11 +36,13 @@ export function Setup({ onClose }: { onClose: () => void }) {
   const [githubListNote, setGithubListNote] = useState('Repository list has not loaded.');
   const [vercelListNote, setVercelListNote] = useState('Project list has not loaded.');
   const [services, setServices] = useState<{ id: string; name: string; repository: string; role: string; probePath: string; enabled: boolean }[]>([]);
+  const [serviceBusy, setServiceBusy] = useState(false);
+  const [serviceMessage, setServiceMessage] = useState('');
   const [serviceDraft, setServiceDraft] = useState({ name: '', repository: '', vercelProjectId: '', productionHost: '', probePath: '/api/tasks', role: 'app' });
 
   const loadServices = useCallback(async () => {
     const response = await fetch('/api/watched-services', { credentials: 'same-origin' });
-    if (!response.ok) return;
+    if (!response.ok) { setServiceMessage('Could not load services. Try refreshing.'); return; }
     const body = await response.json() as { services?: { id: string; name: string; repository: string; role: string; probePath: string; enabled: boolean }[] };
     setServices(body.services ?? []);
   }, []);
@@ -139,6 +141,36 @@ export function Setup({ onClose }: { onClose: () => void }) {
       />
       {item.configured && <small>Configured · value hidden</small>}
     </label>;
+  }
+
+  async function addService(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setServiceBusy(true);
+    setServiceMessage('');
+    try {
+      const response = await fetch('/api/watched-services', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(serviceDraft) });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({})) as { error?: string };
+        throw new Error(body.error || 'Could not add the service. Check the details and try again.');
+      }
+      setServiceDraft({ name: '', repository: '', vercelProjectId: '', productionHost: '', probePath: '/api/tasks', role: 'app' });
+      await loadServices();
+      setServiceMessage('Service added.');
+    } catch (reason) {
+      setServiceMessage(reason instanceof Error ? reason.message : 'Could not add the service.');
+    } finally { setServiceBusy(false); }
+  }
+
+  async function removeService(id: string) {
+    setServiceMessage('');
+    try {
+      const response = await fetch(`/api/watched-services?id=${encodeURIComponent(id)}`, { method: 'DELETE', credentials: 'same-origin' });
+      if (!response.ok) throw new Error('Could not remove the service. Try again.');
+      await loadServices();
+      setServiceMessage('Service removed.');
+    } catch (reason) {
+      setServiceMessage(reason instanceof Error ? reason.message : 'Could not remove the service.');
+    }
   }
 
   async function connectVercel() {
@@ -259,18 +291,37 @@ export function Setup({ onClose }: { onClose: () => void }) {
       <a className="button button-ghost" href="/">Incidents</a>
     </div>
 
-    <section className="setup-hero" aria-labelledby="services-title">
-      <div className="setup-hero-copy"><div><h2 id="services-title">Watched services</h2><p>Each row is one repository and one Vercel project. The app and a dependency are watched separately.</p></div></div>
-      <ul>{services.map(service => <li key={service.id}>{service.name} · {service.repository} · {service.role} · {service.probePath} <button type="button" onClick={() => void fetch(`/api/watched-services?id=${service.id}`, { method: 'DELETE', credentials: 'same-origin' }).then(() => loadServices())}>Remove</button></li>)}</ul>
-      {services.length === 0 && <p>No extra services yet. The current saved target is added on controller start.</p>}
-      <button type="button" onClick={() => void loadServices()}>Refresh services</button>
-      <label className="setup-field">Name<input value={serviceDraft.name} onChange={event => setServiceDraft({ ...serviceDraft, name: event.target.value })} /></label>
-      <label className="setup-field">Repository<input value={serviceDraft.repository} placeholder="owner/name" onChange={event => setServiceDraft({ ...serviceDraft, repository: event.target.value })} /></label>
-      <label className="setup-field">Vercel project id<input value={serviceDraft.vercelProjectId} onChange={event => setServiceDraft({ ...serviceDraft, vercelProjectId: event.target.value })} /></label>
-      <label className="setup-field">Host<input value={serviceDraft.productionHost} onChange={event => setServiceDraft({ ...serviceDraft, productionHost: event.target.value })} /></label>
-      <label className="setup-field">Probe<input value={serviceDraft.probePath} onChange={event => setServiceDraft({ ...serviceDraft, probePath: event.target.value })} /></label>
-      <label className="setup-field">Role<select value={serviceDraft.role} onChange={event => setServiceDraft({ ...serviceDraft, role: event.target.value })}><option value="app">app</option><option value="dependency">dependency</option></select></label>
-      <button type="button" onClick={() => void fetch('/api/watched-services', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(serviceDraft) }).then(() => loadServices())}>Add service</button>
+    <section className="setup-hero services-panel" aria-labelledby="services-title">
+      <div className="services-heading">
+        <div>
+          <h2 id="services-title">Watched services</h2>
+          <p>Manage the applications and dependencies Sentinel monitors.</p>
+        </div>
+        <button className="button button-secondary services-refresh" type="button" onClick={() => void loadServices()}>Refresh list</button>
+      </div>
+
+      <div className="services-inventory">
+        <div className="services-inventory-heading"><span>Service inventory</span><span>{services.length} {services.length === 1 ? 'service' : 'services'}</span></div>
+        {services.length > 0 ? <ul className="service-list">{services.map(service => <li className="service-row" key={service.id}>
+          <div className="service-identity"><span className="service-indicator" aria-hidden="true" /><div><strong>{service.name}</strong><span>{service.repository}</span></div></div>
+          <div className="service-details"><span className="service-role">{service.role}</span><code>{service.probePath}</code></div>
+          <button className="service-remove" type="button" aria-label={`Remove ${service.name}`} onClick={() => void removeService(service.id)}>Remove</button>
+        </li>)}</ul> : <p className="services-empty">No extra services yet. The current saved target is added when the controller starts.</p>}
+      </div>
+
+      <form className="service-form" onSubmit={event => void addService(event)}>
+        <div className="service-form-heading"><div><h3>Add a service</h3><p>Connect a repository to its Vercel project and production endpoint.</p></div></div>
+        <div className="service-form-grid">
+          <label className="setup-field"><span>Name</span><input required value={serviceDraft.name} placeholder="e.g. API" onChange={event => setServiceDraft({ ...serviceDraft, name: event.target.value })} /></label>
+          <label className="setup-field"><span>Repository</span><input required value={serviceDraft.repository} placeholder="owner/repository" onChange={event => setServiceDraft({ ...serviceDraft, repository: event.target.value })} /></label>
+          <label className="setup-field"><span>Vercel project ID</span><input required value={serviceDraft.vercelProjectId} placeholder="prj_..." onChange={event => setServiceDraft({ ...serviceDraft, vercelProjectId: event.target.value })} /></label>
+          <label className="setup-field"><span>Production host</span><input required value={serviceDraft.productionHost} placeholder="example.com" onChange={event => setServiceDraft({ ...serviceDraft, productionHost: event.target.value })} /></label>
+          <label className="setup-field"><span>Probe path</span><input required value={serviceDraft.probePath} onChange={event => setServiceDraft({ ...serviceDraft, probePath: event.target.value })} /></label>
+          <label className="setup-field"><span>Role</span><select value={serviceDraft.role} onChange={event => setServiceDraft({ ...serviceDraft, role: event.target.value })}><option value="app">Application</option><option value="dependency">Dependency</option></select></label>
+        </div>
+        <div className="service-form-actions"><p>Each service is monitored separately.</p><button className="button button-primary" disabled={serviceBusy} type="submit">{serviceBusy ? 'Adding…' : 'Add service'}</button></div>
+        {serviceMessage && <p className="service-message" role="status">{serviceMessage}</p>}
+      </form>
     </section>
 
     <section className="setup-hero" aria-labelledby="render-title">

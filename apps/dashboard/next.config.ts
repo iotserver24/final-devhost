@@ -10,6 +10,8 @@ if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password 
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
+  // Keep production builds from overwriting the live development server's files.
+  distDir: process.env.NODE_ENV === 'development' ? '.next-dev' : '.next',
   async rewrites() {
     return [{ source: '/api/:path*', destination: `${target}/api/:path*` }];
   },
