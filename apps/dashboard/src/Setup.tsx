@@ -34,8 +34,13 @@ export function Setup({ onClose }: { onClose: () => void }) {
   const [vercelListNote, setVercelListNote] = useState('Project list has not loaded.');
 
   const loadSettings = useCallback(async (signal?: AbortSignal) => {
-    const response = await fetch('/api/settings', { headers: { Accept: 'application/json' }, signal });
-    if (!response.ok) throw new Error('The controller did not return integration settings.');
+    const response = await fetch('/api/settings', { credentials: 'same-origin', headers: { Accept: 'application/json' }, signal });
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({})) as { error?: string };
+      if (response.status === 401) throw new Error('Sign in again. The controller rejected this session.');
+      if (response.status === 403) throw new Error('This account cannot open integration settings. Sign in with the administrator account, not the viewer account.');
+      throw new Error(body.error || `The controller did not return integration settings (HTTP ${response.status}).`);
+    }
     const body = await response.json() as { fields: SettingField[] };
     setFields(body.fields);
     setDraft(current => Object.fromEntries(body.fields.map(field => [field.key, current[field.key] ?? (field.secret ? '' : field.value)])));

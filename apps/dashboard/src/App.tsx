@@ -371,7 +371,7 @@ function FailureStreak({ watch }: { watch: WatchState | null }) {
   </section>;
 }
 
-function Dashboard() {
+function Dashboard({ onLogout }: { onLogout: () => void }) {
   const [watch, setWatch] = useState<WatchState | null>(null);
   const [showSetup, setShowSetup] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -384,7 +384,7 @@ function Dashboard() {
   const counts = useMemo(() => ({ active: visible.filter(item => !['recovered', 'needs_human', 'remediation_failed', 'pr_opened'].includes(item.status)).length, recovered: visible.filter(item => item.status === 'recovered').length }), [visible]);
 
   return <div className="app-shell">
-    <header className="topbar"><div className="brand"><img className="brand-logo" src="/logo.png" alt="Sentinel logo" /><span>Sentinel <em>deploy watch</em></span></div><div className="topbar-meta"><LiveWatch onWatch={setWatch} /><span className={`mode-dot ${mode}`} />{mode === 'fixtures' ? 'Rehearsal data' : 'Live controller'}<button className="refresh" onClick={() => setShowSetup(value => !value)} type="button">Setup</button><button className="refresh" onClick={() => setRefresh(value => value + 1)} type="button">Refresh</button></div></header>
+    <header className="topbar"><div className="brand"><img className="brand-logo" src="/logo.png" alt="Sentinel logo" /><span>Sentinel <em>deploy watch</em></span></div><div className="topbar-meta"><LiveWatch onWatch={setWatch} /><span className={`mode-dot ${mode}`} />{mode === 'fixtures' ? 'Rehearsal data' : 'Live controller'}<button className="refresh" onClick={() => setShowSetup(value => !value)} type="button">Setup</button><button className="refresh" onClick={() => setRefresh(value => value + 1)} type="button">Refresh</button><button className="refresh" onClick={onLogout} type="button">Log out</button></div></header>
     <FailureStreak watch={watch} />
     <div className="workspace">
       <aside className="sidebar"><div className="sidebar-heading"><div><p className="eyebrow">Operations</p><h2>Incidents</h2></div><span className="count">{visible.length}</span></div><div className="sidebar-stats"><span><strong>{counts.active}</strong> active</span><span><strong>{counts.recovered}</strong> recovered</span></div>
@@ -445,8 +445,15 @@ function AuthenticatedApp() {
       .catch(() => undefined)
       .finally(() => setChecking(false));
   }, []);
+  async function logout() {
+    try {
+      await fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' });
+    } catch { /* still leave the desk; the cookie clear is best-effort */ }
+    setAuthenticated(false);
+  }
+
   if (checking) return <main className="login-shell"><p className="muted">Checking dashboard session…</p></main>;
-  return authenticated ? <Dashboard /> : <Login onAuthenticated={() => setAuthenticated(true)} />;
+  return authenticated ? <Dashboard onLogout={() => void logout()} /> : <Login onAuthenticated={() => setAuthenticated(true)} />;
 }
 
 export default function App() {
