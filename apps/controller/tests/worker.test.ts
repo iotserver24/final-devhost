@@ -7,7 +7,7 @@ let store: IncidentStore;
 afterEach(() => store?.close());
 
 describe('startPollingWorker', () => {
-  it('runs requested projects serially and stops future checks', async () => {
+  it('polls each distinct project and stops future checks', async () => {
     store = new IncidentStore(':memory:');
     const probedProjects: string[] = [];
     const provider: DeploymentProvider = {
@@ -43,6 +43,37 @@ describe('startPollingWorker', () => {
     await worker.stop();
     await worker.pollNow();
     expect(probedProjects).toHaveLength(2);
+  });
+
+  it('keeps checking another project while one project is blocked', async () => {
+    store = new IncidentStore(':memory:');
+    let releaseSlow!: () => void;
+    let resolveFast!: () => void;
+    const slow = new Promise<void>(resolve => { releaseSlow = resolve; });
+    const fastTwice = new Promise<void>(resolve => { resolveFast = resolve; });
+    let fastChecks = 0;
+    const provider: DeploymentProvider = {
+      async getProductionDeployment(projectId) {
+        if (projectId === 'slow') await slow;
+        else if (++fastChecks === 2) resolveFast();
+        return { id: `deployment-${projectId}`, immutableUrl: 'https://healthy-demo.vercel.app', createdAt: new Date().toISOString() };
+      },
+      async getPreviousDeployment() { return null; },
+      async probeImmutableDeployment() { return { result: 'pass', evidence: 'HTTP 200' }; },
+      async rollbackProductionTo() { throw new Error('Should not roll back'); },
+      async probeProduction() { return { result: 'pass', evidence: 'HTTP 200' }; },
+    };
+    const worker = startPollingWorker({
+      projectIds: ['slow', 'fast'], allowlistedProjectIds: new Set(),
+      probePath: '/api/tasks', provider, store, intervalMs: 1_000,
+    });
+    try {
+      await Promise.race([fastTwice, Bun.sleep(4_000).then(() => { throw new Error('Fast project did not run its second check'); })]);
+      expect(fastChecks).toBeGreaterThanOrEqual(2);
+    } finally {
+      releaseSlow();
+      await worker.stop();
+    }
   });
 
   it('checks deployment status less often than runtime probes', async () => {

@@ -37,17 +37,18 @@ export function startPollingWorker(options: PollingWorkerOptions): PollingWorker
   const intervalMs = Math.max(1_000, Math.min(Math.trunc(options.intervalMs ?? 30_000), 300_000));
   const deploymentStatusIntervalMs = Math.max(1_000, Math.min(Math.trunc(options.deploymentStatusIntervalMs ?? 60_000), 600_000));
   const lastDeploymentStatusAt = new Map<string, number>();
+  const groups = new Map<string, WatchTarget[]>();
+  for (const target of targets) groups.set(target.projectId, [...(groups.get(target.projectId) ?? []), target]);
+  const timers = new Map<string, ReturnType<typeof setTimeout>>();
+  const active = new Map<string, Promise<void>>();
   let stopped = false;
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  let activeCycle: Promise<void> | undefined;
 
-  const runCycle = (): Promise<void> => {
+  const runGroup = (projectId: string): Promise<void> => {
     if (stopped) return Promise.resolve();
-    if (activeCycle) return activeCycle;
-
-    activeCycle = (async () => {
-      for (const target of targets) {
-        const projectId = target.projectId;
+    const running = active.get(projectId);
+    if (running) return running;
+    const cycle = (async () => {
+      for (const target of groups.get(projectId) ?? []) {
         if (stopped) break;
         let result: MonitorResult;
         try {
@@ -55,22 +56,18 @@ export function startPollingWorker(options: PollingWorkerOptions): PollingWorker
           const statusDue = !lastDeploymentStatusAt.has(projectId)
             || now - lastDeploymentStatusAt.get(projectId)! >= deploymentStatusIntervalMs;
           if (statusDue) lastDeploymentStatusAt.set(projectId, now);
-          // A class instance loses its methods when copied. Hide the status
-          // method without copying the provider.
-          const provider = statusDue || !options.provider.getLatestDeploymentStatus
-            ? options.provider
-            : new Proxy(options.provider, {
-              get(target, property, receiver) {
+          const selectedProvider = target.provider ?? options.provider;
+          const provider = statusDue || !selectedProvider.getLatestDeploymentStatus
+            ? selectedProvider
+            : new Proxy(selectedProvider, {
+              get(instance, property, receiver) {
                 if (property === 'getLatestDeploymentStatus') return undefined;
-                const value = Reflect.get(target, property, receiver);
-                return typeof value === 'function' ? value.bind(target) : value;
+                const value = Reflect.get(instance, property, receiver);
+                return typeof value === 'function' ? value.bind(instance) : value;
               },
             });
           result = await checkProject({
-            ...options,
-            provider: target.provider ?? provider,
-            projectId,
-            probePath: target.probePath || options.probePath,
+            ...options, provider, projectId, probePath: target.probePath || options.probePath,
             ...(target.serviceId ? { serviceId: target.serviceId } : {}),
             ...(target.repository ? { repository: target.repository } : {}),
             ...(target.role ? { serviceRole: target.role } : {}),
@@ -78,35 +75,37 @@ export function startPollingWorker(options: PollingWorkerOptions): PollingWorker
             ...(target.posthogProject ? { posthogProject: target.posthogProject } : {}),
           });
         } catch {
-          try { await options.onError?.(projectId); } catch { /* keep other projects polling */ }
+          try { await options.onError?.(projectId); } catch { /* keep polling */ }
           continue;
         }
         try { await options.onResult?.(projectId, result); } catch {
-          try { await options.onError?.(projectId); } catch { /* keep other projects polling */ }
+          try { await options.onError?.(projectId); } catch { /* keep polling */ }
         }
       }
     })().finally(() => {
-      activeCycle = undefined;
-      if (!stopped) timer = setTimeout(() => void runCycle(), intervalMs);
+      active.delete(projectId);
+      if (!stopped) timers.set(projectId, setTimeout(() => { timers.delete(projectId); void runGroup(projectId); }, intervalMs));
     });
-
-    return activeCycle;
+    active.set(projectId, cycle);
+    return cycle;
   };
 
   const worker: PollingWorker = {
     pollNow: async () => {
-      if (timer) clearTimeout(timer);
-      timer = undefined;
-      await runCycle();
+      for (const timer of timers.values()) clearTimeout(timer);
+      timers.clear();
+      await Promise.all([...groups.keys()].map(runGroup));
     },
     stop: async () => {
       stopped = true;
-      if (timer) clearTimeout(timer);
-      timer = undefined;
-      await activeCycle;
+      for (const timer of timers.values()) clearTimeout(timer);
+      timers.clear();
+      await Promise.all([...active.values()]);
     },
   };
 
-  if (options.startImmediately !== false) void runCycle();
+  if (options.startImmediately !== false) {
+    for (const projectId of groups.keys()) void runGroup(projectId);
+  }
   return worker;
 }
