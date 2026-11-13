@@ -11,7 +11,7 @@ const statusClass: Record<string, string> = {
 
 const STATUSES: TaskStatus[] = ["Todo", "In progress", "Done"];
 
-type FaultMode = "healthy" | "runtime" | "persistent" | "dependency" | "ambiguous";
+type FaultMode = "healthy" | "runtime" | "persistent" | "dependency" | "config" | "ambiguous";
 
 type ServiceProbe = {
   service: string;
@@ -51,6 +51,7 @@ const FAULT_MODES: { mode: FaultMode; label: string; hint: string }[] = [
   { mode: "runtime", label: "Runtime fault", hint: "health + tasks return HTTP 500" },
   { mode: "persistent", label: "Persistent fault", hint: "tasks returns HTTP 500 only" },
   { mode: "dependency", label: "Dependency fault", hint: "tasks returns HTTP 503, upstream store unreachable" },
+  { mode: "config", label: "Config fault", hint: "billing mode drifted from the known-good value" },
   { mode: "ambiguous", label: "Ambiguous fault", hint: "unsafe: health and tasks disagree" }
 ];
 

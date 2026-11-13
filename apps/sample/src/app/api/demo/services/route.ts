@@ -21,7 +21,9 @@ export function GET() {
             ? "Task API failed its health check after the latest deployment."
             : mode === "dependency"
               ? "Task API reports the upstream dependency returned 503."
-              : "Task API is healthy.",
+              : mode === "config"
+                ? "Task API is up, but the billing config does not match the last known-good value."
+                : "Task API is healthy.",
       },
       {
         serviceId: "dependency",

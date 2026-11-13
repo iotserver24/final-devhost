@@ -2,7 +2,11 @@ import Link from "next/link";
 
 const links = [
   { href: "/", label: "Board" },
-  { href: "/projects", label: "Projects" }
+  { href: "/projects", label: "Projects" },
+  { href: "/sites/ledger", label: "Ledger" },
+  { href: "/sites/switchboard", label: "Switchboard" },
+  { href: "/sites/hopper", label: "Hopper" },
+  { href: "/sites/relay", label: "Relay" },
 ];
 
 export function Shell({ children }: { children: React.ReactNode }) {

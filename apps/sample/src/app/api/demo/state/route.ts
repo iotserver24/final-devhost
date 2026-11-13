@@ -10,10 +10,11 @@ export function GET() {
     activeFault: mode === "runtime" ? "bad_deployment"
       : mode === "dependency" ? "dependency_down"
       : mode === "persistent" ? "resource_exhaustion"
+      : mode === "config" ? "bad_config"
       : mode === "ambiguous" ? "ambiguous"
       : undefined,
     faultInjectedAt: mode === "healthy" ? undefined : state.updatedAt,
     knownGoodRevision: mode === "runtime" ? "good-rev" : undefined,
-    knownGoodConfig: undefined,
+    knownGoodConfig: mode === "config" ? { BILLING_MODE: "invoice" } : undefined,
   });
 }

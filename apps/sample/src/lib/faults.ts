@@ -1,4 +1,4 @@
-export type FaultMode = "healthy" | "runtime" | "persistent" | "dependency" | "ambiguous";
+export type FaultMode = "healthy" | "runtime" | "persistent" | "dependency" | "config" | "ambiguous";
 
 export type FaultState = {
   mode: FaultMode;
@@ -8,7 +8,7 @@ export type FaultState = {
 
 function envFaultMode(): FaultMode | null {
   const mode = process.env.DEMO_FAULT_MODE;
-  if (mode === "runtime" || mode === "persistent" || mode === "dependency" || mode === "ambiguous") {
+  if (mode === "runtime" || mode === "persistent" || mode === "dependency" || mode === "config" || mode === "ambiguous") {
     return mode;
   }
   return null;

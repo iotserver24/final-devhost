@@ -842,7 +842,7 @@ void (async () => {
       type: 'remediation_retry',
       message: 'This incident was waiting for a person. Starting a sandbox fix and pull request anyway.',
     });
-    await finishRemediation(incident, { store, actions } as Parameters<typeof finishRemediation>[1]);
+    await finishRemediation(incident, { store, actions } as unknown as Parameters<typeof finishRemediation>[1]);
   }
 })();
 

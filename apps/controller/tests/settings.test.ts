@@ -45,7 +45,8 @@ describe('integration settings', () => {
     delete process.env.SMTP_TO;
     await applyStoredSettings(store);
     expect(process.env.CONTROLLER_REMEDIATION_ENABLED).toBe('true');
-    expect(process.env.SMTP_TO).toBe('judge@example.com');
+    const env = process.env as Record<string, string | undefined>;
+    expect(env.SMTP_TO).toBe('judge@example.com');
     if (previousRemediation === undefined) delete process.env.CONTROLLER_REMEDIATION_ENABLED;
     else process.env.CONTROLLER_REMEDIATION_ENABLED = previousRemediation;
     if (previousSmtp === undefined) delete process.env.SMTP_TO;

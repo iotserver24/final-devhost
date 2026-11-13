@@ -251,8 +251,9 @@ export async function finishRemediation(
       const actionUrl = safeLink(result.actionUrl);
       if (actionUrl) incident.actionUrl = actionUrl;
       incident.evidence.push(...(result.evidence ?? []).map(evidence));
-      incident.timing = { ...(incident.timing ?? {}), actionAt: new Date().toISOString() };
-      incident.events.push(event(incident.timing.actionAt, 'draft_pr', result.message));
+      const actionAt = new Date().toISOString();
+      incident.timing = { ...(incident.timing ?? {}), actionAt };
+      incident.events.push(event(actionAt, 'draft_pr', result.message));
     } else {
       incident.status = 'remediation_failed';
       incident.decision = 'fix_pr';
