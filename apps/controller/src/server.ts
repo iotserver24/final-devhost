@@ -120,7 +120,15 @@ function readMonitorConfig(): MonitorConfig {
   return { projectId, rollbackEnabled, probePath: process.env.CONTROLLER_PROBE_PATH ?? '/api/tasks', pollIntervalMs, deploymentStatusIntervalMs, logsIntervalMs, provider, platform };
 }
 
-const monitorConfig = monitorFlag === 'true' ? readMonitorConfig() : undefined;
+let monitorConfig: MonitorConfig | undefined;
+let monitorConfigurationError: string | undefined;
+if (monitorFlag === 'true') {
+  try { monitorConfig = readMonitorConfig(); }
+  catch (error) {
+    monitorConfigurationError = error instanceof Error ? error.message : 'Monitoring configuration is invalid.';
+    console.error(`Monitoring unavailable: ${monitorConfigurationError}`);
+  }
+}
 
 const dashboardAuth = new DashboardAuth(process.env.DASHBOARD_USERNAME ?? '', process.env.DASHBOARD_PASSWORD ?? '');
 const loginLimiter = new RateLimiter(Number(process.env.CONTROLLER_LOGIN_RATE_LIMIT ?? 10), 5 * 60_000);
@@ -139,34 +147,36 @@ if (remediationFlag === 'true') {
   const githubAppReady = Boolean(process.env.GITHUB_APP_ID && process.env.GITHUB_APP_PEM && process.env.GITHUB_INSTALLATION_ID);
   if (!process.env.GITHUB_READ_TOKEN && !githubAppReady) missing.push('GITHUB_READ_TOKEN or a connected GitHub app');
   if (!process.env.REMEDIATOR_REPOSITORY) missing.push('REMEDIATOR_REPOSITORY');
-  if (missing.length) throw new Error(`Remediation requires configuration: ${missing.join(', ')}.`);
-  const pathPrefix = `${(process.env.REMEDIATOR_ALLOWED_PATH_PREFIX?.trim() || 'apps/sample/').replace(/\/?$/, '/')}`;
-  const standaloneSample = pathPrefix === 'src/';
-  const fixturePath = `${pathPrefix}tests/crash.repro.test.ts`;
-  const configuredFixture = process.env.REMEDIATOR_FIXTURE_PATH?.trim();
-  const fixturePattern = new RegExp(`^${pathPrefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}tests/[A-Za-z0-9._/-]+\\.test\\.ts$`);
-  const safeFixturePath = configuredFixture && fixturePattern.test(configuredFixture) ? configuredFixture : fixturePath;
-  remediation = {
-    repository: process.env.REMEDIATOR_REPOSITORY ?? '',
-    setupCommand: process.env.REMEDIATOR_SETUP_COMMAND ?? (standaloneSample ? 'bun install --frozen-lockfile' : 'bun install --frozen-lockfile --filter ./apps/sample'),
-    reproduceCommand: `bun test ${safeFixturePath}`,
-    testCommand: standaloneSample ? `bun test ${safeFixturePath}` : (process.env.REMEDIATOR_TEST_COMMAND ?? 'bun run --cwd apps/sample test'),
-    buildCommand: process.env.REMEDIATOR_BUILD_COMMAND ?? (standaloneSample ? 'bun run build' : 'bun run --cwd apps/sample build'),
-    provider: {
-      modelName: process.env.REMEDIATOR_MODEL_NAME ?? 'dedicated-remediator',
-      modelId: process.env.REMEDIATOR_MODEL_ID!,
-      baseUrl: process.env.REMEDIATOR_MODEL_BASE_URL!,
-      apiBackend: (process.env.REMEDIATOR_MODEL_API_BACKEND ?? 'chat_completions') as RemediationConfig['provider']['apiBackend'],
-      apiKey: process.env.REMEDIATOR_MODEL_API_KEY!,
-      githubReadToken: process.env.GITHUB_READ_TOKEN ?? 'github-app',
-    },
-    reproductionFixture: {
-      path: safeFixturePath,
-      sourceFile: resolve(packageDirectory, '..', '..', standaloneSample || safeFixturePath.startsWith('src/')
-        ? 'packages/remediator/fixtures/task-crash.src.test.ts.txt'
-        : 'packages/remediator/fixtures/task-crash.sample.test.ts.txt'),
-    },
-  };
+  if (missing.length) console.error(`Remediation unavailable: missing ${missing.join(', ')}.`);
+  else {
+    const pathPrefix = `${(process.env.REMEDIATOR_ALLOWED_PATH_PREFIX?.trim() || 'apps/sample/').replace(/\/?$/, '/')}`;
+    const standaloneSample = pathPrefix === 'src/';
+    const fixturePath = `${pathPrefix}tests/crash.repro.test.ts`;
+    const configuredFixture = process.env.REMEDIATOR_FIXTURE_PATH?.trim();
+    const fixturePattern = new RegExp(`^${pathPrefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}tests/[A-Za-z0-9._/-]+\\.test\\.ts$`);
+    const safeFixturePath = configuredFixture && fixturePattern.test(configuredFixture) ? configuredFixture : fixturePath;
+    remediation = {
+      repository: process.env.REMEDIATOR_REPOSITORY ?? '',
+      setupCommand: process.env.REMEDIATOR_SETUP_COMMAND ?? (standaloneSample ? 'bun install --frozen-lockfile' : 'bun install --frozen-lockfile --filter ./apps/sample'),
+      reproduceCommand: `bun test ${safeFixturePath}`,
+      testCommand: standaloneSample ? `bun test ${safeFixturePath}` : (process.env.REMEDIATOR_TEST_COMMAND ?? 'bun run --cwd apps/sample test'),
+      buildCommand: process.env.REMEDIATOR_BUILD_COMMAND ?? (standaloneSample ? 'bun run build' : 'bun run --cwd apps/sample build'),
+      provider: {
+        modelName: process.env.REMEDIATOR_MODEL_NAME ?? 'dedicated-remediator',
+        modelId: process.env.REMEDIATOR_MODEL_ID!,
+        baseUrl: process.env.REMEDIATOR_MODEL_BASE_URL!,
+        apiBackend: (process.env.REMEDIATOR_MODEL_API_BACKEND ?? 'chat_completions') as RemediationConfig['provider']['apiBackend'],
+        apiKey: process.env.REMEDIATOR_MODEL_API_KEY!,
+        githubReadToken: process.env.GITHUB_READ_TOKEN ?? 'github-app',
+      },
+      reproductionFixture: {
+        path: safeFixturePath,
+        sourceFile: resolve(packageDirectory, '..', '..', standaloneSample || safeFixturePath.startsWith('src/')
+          ? 'packages/remediator/fixtures/task-crash.src.test.ts.txt'
+          : 'packages/remediator/fixtures/task-crash.sample.test.ts.txt'),
+      },
+    };
+  }
 }
 const hub = new ActivityHub({
   saveRun: run => { void Promise.resolve(store.saveAgentRun(run)).catch(() => undefined); },
@@ -206,8 +216,8 @@ const activityApi = createActivityApi({
 });
 const watch = {
   checkedAt: null as string | null,
-  outcome: 'starting' as 'starting' | 'healthy' | 'failing' | 'incident' | 'unavailable',
-  detail: 'Waiting for the first production check.',
+  outcome: (monitorConfigurationError ? 'unavailable' : 'starting') as 'starting' | 'healthy' | 'failing' | 'incident' | 'unavailable',
+  detail: monitorConfigurationError ?? 'Waiting for the first production check.',
   probePath: monitorConfig?.probePath ?? '/api/tasks',
   rollbackEnabled: Boolean(monitorConfig?.rollbackEnabled),
   intervalMs: monitorConfig?.pollIntervalMs ?? 30_000,
@@ -921,7 +931,9 @@ async function integrationRoutes(request: Request, settingsStore: typeof store):
     process.env.CONTROLLER_MONITOR_ENABLED = 'true';
     await settingsStore.writeSettings({ CONTROLLER_MONITOR_ENABLED: 'true' });
     try {
-      await launchMonitor(readMonitorConfig());
+      const config = readMonitorConfig();
+      await launchMonitor(config);
+      monitorConfig = config;
     } catch (error) {
       return Response.json({ error: error instanceof Error ? error.message : 'The monitor did not start.' }, { status: 400 });
     }
@@ -951,7 +963,11 @@ async function integrationRoutes(request: Request, settingsStore: typeof store):
       vercelDevice = undefined;
       if (monitorWorker) {
         await stopMonitor(false);
-        try { await launchMonitor(readMonitorConfig()); }
+        try {
+          const config = readMonitorConfig();
+          await launchMonitor(config);
+          monitorConfig = config;
+        }
         catch (error) {
           watch.outcome = 'unavailable';
           watch.detail = error instanceof Error ? error.message : 'The monitor could not restart after reconnecting.';
@@ -1134,7 +1150,11 @@ if (!process.env.NEXATHON_RUN_TOKEN) {
   console.info('Agent runs are read-only: set NEXATHON_RUN_TOKEN to allow the local CLI to start one.');
 }
 
-if (monitorConfig) launchMonitor(monitorConfig);
+if (monitorConfig) void launchMonitor(monitorConfig).catch(error => {
+  watch.outcome = 'unavailable';
+  watch.detail = error instanceof Error ? error.message : 'The monitor could not start.';
+  console.error(`Monitoring unavailable: ${watch.detail}`);
+});
 startLocalDemoMonitor();
 if (remediation) setInterval(() => { void pollIncidentComments(); }, 15_000);
 

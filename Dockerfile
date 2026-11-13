@@ -25,6 +25,7 @@ RUN apt-get update \
 WORKDIR /app
 COPY package.json bun.lock ./
 COPY apps/controller/package.json apps/controller/package.json
+COPY apps/vm-agent/package.json apps/vm-agent/package.json
 COPY packages/contracts/package.json packages/contracts/package.json
 COPY packages/notifier/package.json packages/notifier/package.json
 COPY packages/remediator/package.json packages/remediator/package.json

@@ -61,6 +61,10 @@
         "typescript": "^5.7.3",
       },
     },
+    "apps/vm-agent": {
+      "name": "@nexathon/vm-agent",
+      "version": "0.1.0",
+    },
     "packages/contracts": {
       "name": "@nexathon/contracts",
       "version": "0.1.0",
@@ -204,6 +208,8 @@
     "@nexathon/remediator": ["@nexathon/remediator@workspace:packages/remediator"],
 
     "@nexathon/sample": ["@nexathon/sample@workspace:apps/sample"],
+
+    "@nexathon/vm-agent": ["@nexathon/vm-agent@workspace:apps/vm-agent"],
 
     "@next/env": ["@next/env@15.5.28", "", {}, "sha512-xxW5EBI8fMPuVTPBW7LL980IRbuDXlbkUAwp9DDhtb4Lnich3nJ13uYpvrX4VE74hWPf6AvHHAMmGCidcHjbfg=="],
 
