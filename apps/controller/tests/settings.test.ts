@@ -39,11 +39,14 @@ describe('integration settings', () => {
   it('uses reconnected Vercel credentials instead of an expired host token after restart', async () => {
     const store = new IncidentStore(':memory:');
     const before = process.env.VERCEL_ACCESS_TOKEN;
+    const previousTemplate = process.env.E2B_REMEDIATOR_TEMPLATE;
     try {
       process.env.VERCEL_ACCESS_TOKEN = 'expired-host-token';
-      await store.writeSettings({ VERCEL_ACCESS_TOKEN: 'reconnected-token' });
+      process.env.E2B_REMEDIATOR_TEMPLATE = 'old-template';
+      await store.writeSettings({ VERCEL_ACCESS_TOKEN: 'reconnected-token', E2B_REMEDIATOR_TEMPLATE: 'working-template' });
       await applyStoredSettings(store);
       expect(process.env.VERCEL_ACCESS_TOKEN).toBe('reconnected-token');
+      expect(process.env.E2B_REMEDIATOR_TEMPLATE).toBe('working-template');
       const response = await createSettingsApi(store)(new Request('http://localhost/api/settings'));
       const body = await response!.json();
       const field = body.fields.find((item: { key: string }) => item.key === 'VERCEL_ACCESS_TOKEN');
@@ -52,6 +55,8 @@ describe('integration settings', () => {
     } finally {
       if (before === undefined) delete process.env.VERCEL_ACCESS_TOKEN;
       else process.env.VERCEL_ACCESS_TOKEN = before;
+      if (previousTemplate === undefined) delete process.env.E2B_REMEDIATOR_TEMPLATE;
+      else process.env.E2B_REMEDIATOR_TEMPLATE = previousTemplate;
       store.close();
     }
   });

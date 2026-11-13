@@ -55,7 +55,7 @@ export const settingFields: SettingField[] = [
   { group: 'Email', key: 'SMTP_TO', label: 'To address', secret: false },
 ];
 
-const connectedCredentials = new Set(['VERCEL_ACCESS_TOKEN', 'VERCEL_REFRESH_TOKEN']);
+const dashboardOverrides = new Set(['VERCEL_ACCESS_TOKEN', 'VERCEL_REFRESH_TOKEN', 'E2B_REMEDIATOR_TEMPLATE']);
 
 const allowed = new Set(settingFields.map(field => field.key));
 
@@ -68,9 +68,9 @@ export async function applyStoredSettings(store: Pick<IncidentStore, 'readSettin
     else delete process.env[key];
   }
   for (const [key, value] of Object.entries(saved)) {
-    // A completed provider login must survive restarts even if the host still has an expired token.
+    // Explicit provider credentials and the selected sandbox template override stale host defaults.
     // Other host settings retain precedence.
-    if (allowed.has(key) && !clientOwned.has(key) && value && (connectedCredentials.has(key) || !process.env[key])) process.env[key] = value;
+    if (allowed.has(key) && !clientOwned.has(key) && value && (dashboardOverrides.has(key) || !process.env[key])) process.env[key] = value;
   }
 }
 
@@ -83,7 +83,7 @@ export function createSettingsApi(store: Pick<IncidentStore, 'readSettings' | 'w
       return Response.json({
         restartRequired: true,
         fields: settingFields.filter(field => !field.hidden).map(field => {
-          const fromHost = !field.clientOwned && !(connectedCredentials.has(field.key) && saved[field.key]) ? process.env[field.key] || '' : '';
+          const fromHost = !field.clientOwned && !(dashboardOverrides.has(field.key) && saved[field.key]) ? process.env[field.key] || '' : '';
           const value = fromHost || saved[field.key] || '';
           return {
             ...field,
