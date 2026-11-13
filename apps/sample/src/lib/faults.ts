@@ -32,6 +32,25 @@ export function getFaultMode(): FaultMode {
   return envFaultMode() ?? "healthy";
 }
 
+export function getFaultState(): FaultState {
+  return getFault();
+}
+
+export function setFaultMode(mode: FaultMode): FaultState {
+  if (envFaultMode()) {
+    throw new Error(`DEMO_FAULT_MODE=${envFaultMode()} is pinned by the environment; demo controls are disabled`);
+  }
+  // Map env-style modes onto the runtime control kinds where they overlap.
+  if (mode === "runtime") return injectFault("bad-deployment");
+  if (mode === "dependency") return injectFault("failing-dependency");
+  if (mode === "persistent") return injectFault("broken-config");
+  return resetFault();
+}
+
+export function resetFaultMode(): FaultState {
+  return resetFault();
+}
+
 export function getFault(): FaultState {
   const env = envFaultMode();
   if (env) {
