@@ -147,7 +147,7 @@ if (remediationFlag === 'true') {
     repository: process.env.REMEDIATOR_REPOSITORY ?? '',
     setupCommand: process.env.REMEDIATOR_SETUP_COMMAND ?? (standaloneSample ? 'bun install --frozen-lockfile' : 'bun install --frozen-lockfile --filter ./apps/sample'),
     reproduceCommand: `bun test ${safeFixturePath}`,
-    testCommand: process.env.REMEDIATOR_TEST_COMMAND ?? (standaloneSample ? 'bun test' : 'bun run --cwd apps/sample test'),
+    testCommand: standaloneSample ? 'bun test' : (process.env.REMEDIATOR_TEST_COMMAND ?? 'bun run --cwd apps/sample test'),
     buildCommand: process.env.REMEDIATOR_BUILD_COMMAND ?? (standaloneSample ? 'bun run build' : 'bun run --cwd apps/sample build'),
     provider: {
       modelName: process.env.REMEDIATOR_MODEL_NAME ?? 'dedicated-remediator',
