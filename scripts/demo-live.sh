@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Local judging demo. Monitoring and rollback stay off. Does not print secrets.
-set -euo pipefail
+set -eu
 cd "$(dirname "$0")/.."
 
 export CONTROLLER_MONITOR_ENABLED=false

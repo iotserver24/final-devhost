@@ -6,7 +6,7 @@
   "packageManager": "bun@1.3.11",
   "workspaces": ["apps/*", "packages/*"],
   "scripts": {
-    "demo:rehearsal": "NEXT_PUBLIC_DATA_MODE=fixtures bun run --cwd apps/dashboard dev",
-    "demo:live": "bash scripts/demo-live.sh"
+    "demo:rehearsal": "powershell -ExecutionPolicy Bypass -File scripts/demo-rehearsal.ps1",
+    "demo:live": "powershell -ExecutionPolicy Bypass -File scripts/demo-live.ps1"
   }
 }

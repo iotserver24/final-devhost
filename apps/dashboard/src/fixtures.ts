@@ -3,6 +3,86 @@ import type { Incident } from './incident';
 // Rehearsal evidence only: these events are not results of live deployments or PRs.
 export const fixtureIncidents: Incident[] = [
   {
+    id: 'demo-106', kind: 'runtime_regression', status: 'needs_human',
+    detectedAt: '2026-10-23T12:40:00Z', projectId: 'taskflow-local', deploymentId: 'task-api',
+    probePath: '/api/tasks/summary', commitSha: '9d21f77', decision: 'escalate',
+    services: [
+      { id: 'task-api', health: 'unhealthy', checkedAt: '2026-10-23T12:40:02Z', detail: 'HTTP 500 on the summary journey' },
+      { id: 'dependency', health: 'healthy', checkedAt: '2026-10-23T12:40:03Z', detail: 'Health check passed' },
+    ],
+    symptoms: ['TaskFlow task summary request returns HTTP 500.', 'Task API logs show a dependency call error.'],
+    cause: { summary: 'The evidence is conflicting: the dependency health check passes while the task API reports a dependency error. The recorded fault label is unavailable to diagnosis.', confidence: 'unknown' },
+    evidenceItems: [
+      { source: 'probe', observation: 'GET /api/tasks/summary returned HTTP 500.', kind: 'observation', at: '2026-10-23T12:39:58Z', serviceId: 'task-api' },
+      { source: 'logs', observation: 'task-api logged "dependency call failed: connection refused".', kind: 'observation', at: '2026-10-23T12:39:58Z', serviceId: 'task-api' },
+      { source: 'health', observation: 'dependency health check returned healthy.', kind: 'observation', at: '2026-10-23T12:40:03Z', serviceId: 'dependency' },
+      { source: 'diagnosis', observation: 'Signals conflict; no single service can be blamed with the available evidence.', kind: 'inference', at: '2026-10-23T12:40:10Z' },
+    ],
+    actions: [
+      { kind: 'restart_service', target: 'dependency', dryRun: true, policyResult: 'denied', policyReason: 'Dependency health is passing; restarting it is not justified by the evidence.', at: '2026-10-23T12:40:12Z' },
+      { kind: 'restart_service', target: 'frontend', dryRun: true, policyResult: 'denied', policyReason: 'Frontend is not on the affected-services allowlist for this incident.', at: '2026-10-23T12:40:13Z' },
+    ],
+    escalation: {
+      reason: 'Conflicting evidence: the dependency reports healthy while the task API reports a dependency error.',
+      at: '2026-10-23T12:40:20Z',
+      recommendedNextStep: 'Check the dependency service logs around 12:39 UTC and the task API configuration manually.',
+      notificationOutcome: 'Slack notification delivered',
+    },
+    timing: { detectedAt: '2026-10-23T12:40:00Z', escalatedAt: '2026-10-23T12:40:20Z' },
+    evidence: ['Dry-run restart of the dependency was denied by policy.', 'Dry-run restart of the frontend was denied: target not allowlisted.', 'No mutation was performed on any service.'],
+    events: [
+      { at: '2026-10-23T12:40:00Z', type: 'detected', message: 'Task summary journey failed three consecutive checks.' },
+      { at: '2026-10-23T12:40:12Z', type: 'decision', message: 'Two dry-run actions denied by policy. No mutation attempted.' },
+      { at: '2026-10-23T12:40:20Z', type: 'escalation', message: 'Escalated to a human with the conflicting evidence.' },
+      { at: '2026-10-23T12:40:24Z', type: 'notification', message: 'Slack notification delivered.' },
+    ],
+  },
+  {
+    id: 'demo-105', kind: 'persistent_defect', status: 'needs_human',
+    detectedAt: '2026-10-23T12:32:00Z', projectId: 'taskflow-local', deploymentId: 'task-api',
+    probePath: '/api/tasks/summary', commitSha: '5b7aae2', decision: 'rollback',
+    services: [
+      { id: 'task-api', health: 'unhealthy', checkedAt: '2026-10-23T12:34:12Z', detail: 'Still failing after the restore attempt' },
+      { id: 'dependency', health: 'healthy', checkedAt: '2026-10-23T12:34:12Z' },
+    ],
+    symptoms: ['Task summary journey returns HTTP 500 after the restore attempt.'],
+    cause: { summary: 'A configuration restore was attempted, but the failure persists; the verified known-good value did not recover the journey.', confidence: 'medium' },
+    evidenceItems: [
+      { source: 'probe', observation: 'GET /api/tasks/summary returned HTTP 500 before the action.', kind: 'observation', at: '2026-10-23T12:31:58Z', serviceId: 'task-api' },
+      { source: 'config', observation: 'Configuration value changed 40 seconds before the first failure.', kind: 'observation', at: '2026-10-23T12:32:05Z', serviceId: 'task-api' },
+      { source: 'probe', observation: 'GET /api/tasks/summary still returned HTTP 500 after the restore.', kind: 'observation', at: '2026-10-23T12:34:10Z', serviceId: 'task-api' },
+      { source: 'diagnosis', observation: 'The config change correlates with the failure, but the restore did not recover the journey.', kind: 'inference', at: '2026-10-23T12:34:15Z' },
+    ],
+    actions: [
+      { kind: 'restore_config', target: 'task-api', dryRun: true, policyResult: 'approved', policyReason: 'Known-good value confirmed; one automatic attempt allowed.', at: '2026-10-23T12:33:00Z' },
+      { kind: 'restore_config', target: 'task-api', dryRun: false, policyResult: 'approved', attempt: 1, result: 'succeeded', resultReason: 'Value written and applied.', at: '2026-10-23T12:33:40Z' },
+    ],
+    verification: {
+      at: '2026-10-23T12:34:12Z',
+      checks: [
+        { label: 'Task API health', serviceId: 'task-api', result: 'fail', detail: 'HTTP 500 after restore.' },
+        { label: 'Dependency health', serviceId: 'dependency', result: 'pass' },
+      ],
+      journey: { label: 'TaskFlow task summary request', result: 'fail', detail: 'HTTP 500; recovery not verified.' },
+    },
+    escalation: {
+      reason: 'Verification failed after the single automatic restore attempt. No further mutation is allowed.',
+      at: '2026-10-23T12:34:30Z',
+      recommendedNextStep: 'Inspect the task API configuration and logs; the known-good value did not restore the journey.',
+      notificationOutcome: 'Notification failed (Slack timeout); incident remains open here',
+    },
+    timing: { faultAt: '2026-10-23T12:31:30Z', detectedAt: '2026-10-23T12:32:00Z', decidedAt: '2026-10-23T12:33:00Z', actionAt: '2026-10-23T12:33:40Z', escalatedAt: '2026-10-23T12:34:30Z' },
+    evidence: ['One automatic restore attempt was used. The policy allows no second attempt.', 'Verification failed; recovery is not claimed.'],
+    events: [
+      { at: '2026-10-23T12:32:00Z', type: 'detected', message: 'Task summary journey failed three consecutive checks.' },
+      { at: '2026-10-23T12:33:00Z', type: 'decision', message: 'Recent config change correlates with the failure; known-good value exists.' },
+      { at: '2026-10-23T12:33:40Z', type: 'action', message: 'Restore of the known-good configuration value executed (attempt 1).' },
+      { at: '2026-10-23T12:34:12Z', type: 'verification', message: 'Verification failed: task API and the user journey still fail.' },
+      { at: '2026-10-23T12:34:30Z', type: 'escalation', message: 'Escalated: single attempt used, verification failed.' },
+      { at: '2026-10-23T12:34:33Z', type: 'notification_failed', message: 'Slack timed out. The incident remains open in the dashboard.' },
+    ],
+  },
+  {
     id: 'demo-104', kind: 'persistent_defect', status: 'needs_human',
     detectedAt: '2026-10-23T12:24:00Z', projectId: 'demo-project', deploymentId: 'demo-sandbox-failure',
     probePath: '/api/health', commitSha: '4c1de9a', decision: 'escalate',
@@ -43,17 +123,43 @@ export const fixtureIncidents: Incident[] = [
   },
   {
     id: 'demo-101', kind: 'runtime_regression', status: 'recovered',
-    detectedAt: '2026-10-23T12:00:00Z', projectId: 'demo-project', deploymentId: 'demo-regression',
-    deploymentUrl: 'https://current-demo.example.com', previousDeploymentUrl: 'https://previous-demo.example.com',
-    commitSha: '8e94b2c', probePath: '/api/health', decision: 'rollback', actionUrl: 'https://previous-demo.example.com',
-    evidence: ['Current deployment: three consecutive HTTP 500 probes on /api/health.', 'Immediate predecessor: the same route returned HTTP 200.', 'One guarded rollback attempted; post-rollback production probe returned HTTP 200. Fixture proof only.'],
+    detectedAt: '2026-10-23T12:00:00Z', projectId: 'taskflow-local', deploymentId: 'task-api',
+    deploymentUrl: 'https://taskflow.local', previousDeploymentUrl: 'https://taskflow-previous.local',
+    commitSha: '8e94b2c', probePath: '/api/tasks/summary', decision: 'rollback', actionUrl: 'https://taskflow-previous.local',
+    services: [
+      { id: 'task-api', health: 'healthy', checkedAt: '2026-10-23T12:00:45Z', detail: 'HTTP 200 after restore' },
+      { id: 'dependency', health: 'healthy', checkedAt: '2026-10-23T12:00:45Z' },
+      { id: 'frontend', health: 'healthy', checkedAt: '2026-10-23T12:00:45Z' },
+    ],
+    symptoms: ['TaskFlow task summary request returns HTTP 500.', 'Task API reports the broken revision fails its health check.'],
+    cause: { summary: 'A broken task API revision was deployed; the known-good predecessor passes the same check.', confidence: 'high' },
+    evidenceItems: [
+      { source: 'probe', observation: 'GET /api/tasks/summary returned HTTP 500 on the current revision.', kind: 'observation', at: '2026-10-23T11:59:58Z', serviceId: 'task-api' },
+      { source: 'deployment', observation: 'Task API revision changed to 8e94b2c at 11:58 UTC.', kind: 'observation', at: '2026-10-23T12:00:05Z', serviceId: 'task-api' },
+      { source: 'probe', observation: 'The known-good predecessor revision returned HTTP 200 on the same route.', kind: 'observation', at: '2026-10-23T12:00:10Z', serviceId: 'task-api' },
+      { source: 'diagnosis', observation: 'The deployment change is the likely cause; restoring the predecessor should recover the journey.', kind: 'inference', at: '2026-10-23T12:00:10Z' },
+    ],
+    actions: [
+      { kind: 'restore_revision', target: 'task-api', dryRun: true, policyResult: 'approved', policyReason: 'Known-good revision confirmed; one automatic attempt allowed.', at: '2026-10-23T12:00:12Z' },
+      { kind: 'restore_revision', target: 'task-api', dryRun: false, policyResult: 'approved', attempt: 1, result: 'succeeded', resultReason: 'Previous revision restored.', at: '2026-10-23T12:00:20Z' },
+    ],
+    verification: {
+      at: '2026-10-23T12:00:45Z',
+      checks: [
+        { label: 'Task API health', serviceId: 'task-api', result: 'pass', detail: 'HTTP 200' },
+        { label: 'Dependency health', serviceId: 'dependency', result: 'pass' },
+      ],
+      journey: { label: 'TaskFlow task summary request', result: 'pass', detail: 'HTTP 200 with real task data.' },
+    },
+    timing: { faultAt: '2026-10-23T11:58:10Z', detectedAt: '2026-10-23T12:00:00Z', decidedAt: '2026-10-23T12:00:12Z', actionAt: '2026-10-23T12:00:20Z', verifiedRecoveredAt: '2026-10-23T12:00:45Z' },
+    evidence: ['Current deployment: three consecutive HTTP 500 probes on /api/tasks/summary.', 'Immediate predecessor: the same route returned HTTP 200.', 'One guarded rollback attempted; post-rollback production probe returned HTTP 200. Fixture proof only.'],
     events: [
       { at: '2026-10-23T12:00:00Z', type: 'detected', message: 'Third failed probe recorded. Open one incident for this deployment.' },
       { at: '2026-10-23T12:00:05Z', type: 'investigation', message: 'Current production revision fails; immediate predecessor passes the same route.' },
-      { at: '2026-10-23T12:00:10Z', type: 'decision', message: 'Fresh regression on the allowlisted demo project. Choose rollback.' },
-      { at: '2026-10-23T12:00:15Z', type: 'rollback', message: 'One rollback attempt. No code merged.' },
-      { at: '2026-10-23T12:00:20Z', type: 'verification', message: 'Production recovery probe passed with HTTP 200.' },
-      { at: '2026-10-23T12:00:23Z', type: 'notification', message: 'Slack recovery report sent in this fixture scenario.' },
+      { at: '2026-10-23T12:00:12Z', type: 'decision', message: 'Fresh regression on the allowlisted demo project. Choose rollback.' },
+      { at: '2026-10-23T12:00:20Z', type: 'rollback', message: 'One rollback attempt. No code merged.' },
+      { at: '2026-10-23T12:00:45Z', type: 'verification', message: 'Service health and the task summary journey both passed after rollback.' },
+      { at: '2026-10-23T12:00:48Z', type: 'notification', message: 'Slack recovery report sent in this fixture scenario.' },
     ],
   },
 ];
