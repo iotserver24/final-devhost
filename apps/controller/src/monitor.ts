@@ -445,7 +445,7 @@ export async function checkProject(options: MonitorOptions): Promise<MonitorResu
       updated = true;
     }
     const fixAttempts = existing.events.filter(item => item.type === 'remediation_started').length;
-    const fixStoppedEarly = ['needs_human', 'remediation_failed'].includes(existing.status) && fixAttempts < 6
+    const fixStoppedEarly = ['needs_human', 'remediation_failed'].includes(existing.status) && fixAttempts < 10
       && !existing.events.some(item => item.type === 'draft_pr');
     if (fixStoppedEarly && options.actions?.remediate) {
       existing.events.push(event(now().toISOString(), 'remediation_retry', 'Retrying the fix. The previous attempt stopped before a pull request.'));
