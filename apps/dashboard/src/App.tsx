@@ -12,6 +12,15 @@ import {
 import { useIncidents, type DataMode } from './useIncidents';
 import { AgentTranscript } from './AgentTranscript';
 import { useActivity } from './useActivity';
+import {
+  ActionAudit,
+  AffectedServices,
+  EscalationBanner,
+  EvidenceItems,
+  incidentHeadline,
+  RecoveryMetrics,
+  Verification,
+} from './incident-detail';
 
 const mode: DataMode = process.env.NEXT_PUBLIC_DATA_MODE === 'fixtures' ? 'fixtures' : 'live';
 
@@ -92,16 +101,9 @@ function IncidentCard({ incident, selected, onSelect }: { incident: Incident; se
         {incident.classification && <span className={`tag tag-${incident.classification}`}>{incident.classification}</span>}
         {incident.evidenceSources?.map(source => <span className="tag" key={source}>{source}</span>)}
       </span>}
-      <span className="card-summary">{incident.events.at(-1)?.message ?? incident.evidence[0] ?? 'No evidence recorded.'}</span>
+      <span className="card-summary">{incidentHeadline(incident)}</span>
     </button>
   );
-}
-
-function Evidence({ incident }: { incident: Incident }) {
-  return <section className="panel evidence-panel">
-    <div className="section-heading"><h2>Evidence</h2><span>{incident.evidence.length} entries</span></div>
-    <ul className="evidence-list">{incident.evidence.map((item, index) => <li key={`${item}-${index}`}>{item}</li>)}</ul>
-  </section>;
 }
 
 function Timeline({ events }: { events: Incident['events'] }) {
@@ -240,7 +242,7 @@ function Detail({ incident, watch }: { incident: Incident; watch: WatchState | n
     <section className="trigger" aria-label="What triggered this incident">
       <div>
         <span className="eyebrow">What triggered this</span>
-        <h2>{detected?.message ?? incident.evidence[0] ?? 'The controller recorded a failure.'}</h2>
+        <h2>{detected?.message ?? incidentHeadline(incident)}</h2>
         <p>{incident.probePath ? `Probe ${incident.probePath}` : 'Deployment status check'}{incident.deploymentUrl ? ` on ${hostOf(incident.deploymentUrl)}` : ''}.</p>
       </div>
       <ul>
@@ -265,9 +267,14 @@ function Detail({ incident, watch }: { incident: Incident; watch: WatchState | n
       <li>{incident.status === 'pr_opened' ? 'Fix — a pull request is open for that bad commit.' : incident.status === 'remediation_failed' ? 'Fix — the latest attempt failed; see the timeline for details.' : incident.status === 'needs_human' ? 'Fix — waiting for the next automatic attempt.' : 'Fix — the agent is working on the bad commit.'}</li>
     </ol>}
     {(incident.decision === 'rollback' || rolledBack(incident)) && <p className="caveat">{rollbackCaveat}</p>}
+    <EscalationBanner incident={incident} />
     <WatchTelemetry watch={watch} />
+    <RecoveryMetrics incident={incident} />
+    <AffectedServices incident={incident} />
+    <ActionAudit actions={incident.actions} />
+    <Verification verification={incident.verification} />
     <LiveActivity incidentId={incident.id} />
-    <div className="detail-columns"><Evidence incident={incident} /><Timeline events={incident.events} /></div>
+    <div className="detail-columns"><EvidenceItems items={incident.evidenceItems} fallback={incident.evidence} /><Timeline events={incident.events} /></div>
   </main>;
 }
 
