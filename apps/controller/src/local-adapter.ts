@@ -37,8 +37,12 @@ export class LocalDemoAdapter {
   }
 
   private async call<T>(path: string, init?: RequestInit): Promise<T> {
+    const headers = new Headers(init?.headers);
+    const token = process.env.DEMO_CONTROL_TOKEN?.trim();
+    if (token && !headers.has("authorization")) headers.set("authorization", `Bearer ${token}`);
     const response = await this.fetchImpl(new URL(path, this.options.demoBaseUrl).toString(), {
       ...init,
+      headers,
       signal: AbortSignal.timeout(this.timeoutMs),
     });
     if (!response.ok) throw new Error(`Demo API ${path} returned HTTP ${response.status}.`);
