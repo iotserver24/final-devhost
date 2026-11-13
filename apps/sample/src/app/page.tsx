@@ -1,15 +1,13 @@
 "use client";
 
-import Link from "next/link";
-<<<<<<< Updated upstream
-import { getProject } from "@/lib/projects";
-import { tasks, type TaskStatus } from "@/lib/tasks";
-=======
 import { useCallback, useEffect, useState } from "react";
 import type { Task, TaskStatus } from "@/lib/tasks";
->>>>>>> Stashed changes
 
-const columns: TaskStatus[] = ["Todo", "In progress", "Done"];
+const statusClass: Record<string, string> = {
+  "Todo": "todo",
+  "In progress": "progress",
+  "Done": "done"
+};
 
 const STATUSES: TaskStatus[] = ["Todo", "In progress", "Done"];
 
@@ -111,8 +109,6 @@ async function fetchTasks(): Promise<TasksState> {
 }
 
 export default function Home() {
-<<<<<<< Updated upstream
-=======
   const [tasksState, setTasksState] = useState<TasksState>({ phase: "loading" });
   const [probes, setProbes] = useState<ServiceProbe[]>([]);
   const [faultState, setFaultState] = useState<FaultState | null>(null);
@@ -188,7 +184,7 @@ export default function Home() {
   }
 
   // Task mutations target the REST contracts BE1 is expected to provide.
-  // Until those endpoints exist the API answers 404 and the UI shows it.
+  // Until those endpoints exist the API answers 404/405 and the UI shows it.
   async function mutateTask(request: Request): Promise<void> {
     setTaskBusy(true);
     setError(null);
@@ -243,7 +239,6 @@ export default function Home() {
   const controlsDisabled = busy || pinnedByEnv;
   const tasks = tasksState.phase === "ready" ? tasksState.tasks : [];
   const total = tasks.length;
->>>>>>> Stashed changes
   const done = tasks.filter((task) => task.status === "Done").length;
   const progress = tasks.filter((task) => task.status === "In progress").length;
 
@@ -253,9 +248,8 @@ export default function Home() {
         <div>
           <p className="eyebrow">BOARD</p>
           <h1>What the team is carrying</h1>
-          <p className="subtitle">{tasks.length} tasks across launch, onboarding, and billing.</p>
+          <p className="subtitle">Live from the task API — {total} tasks on the board.</p>
         </div>
-        <Link className="button" href="/projects">Open projects</Link>
       </section>
 
       <section className="demo-panel" aria-label="Live service status and demo controls">
@@ -367,7 +361,7 @@ export default function Home() {
       <section className="stats" aria-label="Task summary">
         <article className="stat-card">
           <div className="stat-top"><span className="stat-icon lavender">▤</span><span className="stat-label">Open</span></div>
-          <div className="stat-number">{tasks.length - done}</div>
+          <div className="stat-number">{total - done}</div>
           <div className="stat-foot">Still on the board</div>
         </article>
         <article className="stat-card">
@@ -382,30 +376,6 @@ export default function Home() {
         </article>
       </section>
 
-<<<<<<< Updated upstream
-      <section className="board" aria-label="Task board">
-        {columns.map((status) => {
-          const column = tasks.filter((task) => task.status === status);
-          return (
-            <div className="column" key={status}>
-              <header>
-                <h2>{status}</h2>
-                <span>{column.length}</span>
-              </header>
-              {column.map((task) => {
-                const project = getProject(task.projectId);
-                return (
-                  <Link className="card" href={`/tasks/${task.id}`} key={task.id}>
-                    <p className="card-project">{project?.name}</p>
-                    <h3>{task.title}</h3>
-                    <p>{task.owner} · {task.due}</p>
-                  </Link>
-                );
-              })}
-            </div>
-          );
-        })}
-=======
       <section className="tasks-panel">
         <div className="panel-heading">
           <div><h2>Team tasks</h2><p>Live from GET /api/tasks.</p></div>
@@ -487,7 +457,6 @@ export default function Home() {
           <span><span className="footer-dot" /> Task list is fetched from the task API on every refresh</span>
           <span>Demo workspace · v1</span>
         </div>
->>>>>>> Stashed changes
       </section>
     </main>
   );

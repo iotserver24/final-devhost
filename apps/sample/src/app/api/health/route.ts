@@ -1,17 +1,13 @@
 import { NextResponse } from "next/server";
-import { getFaultMode } from "@/lib/tasks";
+import { getFaultMode } from "@/lib/faults";
 
 export const dynamic = "force-dynamic";
 
 export function GET() {
   const mode = getFaultMode();
 
-<<<<<<< Updated upstream
   // Runtime mode intentionally simulates a fresh production regression.
-  if (mode === "runtime") {
-=======
   if (mode === "runtime" || mode === "ambiguous") {
->>>>>>> Stashed changes
     return NextResponse.json(
       {
         ok: false,

@@ -22,12 +22,6 @@ export function GET(request: Request) {
     );
   }
 
-<<<<<<< Updated upstream
-  const status = new URL(request.url).searchParams.get("status");
-  const selected = status
-    ? tasks.filter((task) => task.status.toLowerCase() === status.toLowerCase())
-    : tasks;
-=======
   if (mode === "dependency") {
     return NextResponse.json(
       {
@@ -39,7 +33,10 @@ export function GET(request: Request) {
     );
   }
 
->>>>>>> Stashed changes
+  const status = new URL(request.url).searchParams.get("status");
+  const selected = status
+    ? tasks.filter((task) => task.status.toLowerCase() === status.toLowerCase())
+    : tasks;
   return NextResponse.json({
     ok: true,
     count: selected.length,

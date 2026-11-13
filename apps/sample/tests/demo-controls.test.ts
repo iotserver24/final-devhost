@@ -54,7 +54,7 @@ describe("fault controls", () => {
     expect(body.state.source).toBe("control");
     expect(getFaultMode()).toBe("runtime");
 
-    const [health, taskList] = await Promise.all([getHealth(), getTasks()]);
+    const [health, taskList] = await Promise.all([getHealth(), getTasks(new Request("http://localhost/api/tasks"))]);
     expect(health.status).toBe(500);
     expect(taskList.status).toBe(500);
   });
@@ -68,7 +68,7 @@ describe("fault controls", () => {
     expect(response.status).toBe(200);
     expect(getFaultMode()).toBe("healthy");
 
-    const [health, taskList] = await Promise.all([getHealth(), getTasks()]);
+    const [health, taskList] = await Promise.all([getHealth(), getTasks(new Request("http://localhost/api/tasks"))]);
     expect(health.status).toBe(200);
     expect(taskList.status).toBe(200);
   });
@@ -77,7 +77,7 @@ describe("fault controls", () => {
     setEnv(undefined);
     setFaultMode("dependency");
 
-    const [health, taskList] = await Promise.all([getHealth(), getTasks()]);
+    const [health, taskList] = await Promise.all([getHealth(), getTasks(new Request("http://localhost/api/tasks"))]);
     expect(health.status).toBe(200);
     expect(taskList.status).toBe(503);
     const body = await taskList.json();
@@ -89,7 +89,7 @@ describe("fault controls", () => {
     setEnv(undefined);
     setFaultMode("ambiguous");
 
-    const [health, taskList] = await Promise.all([getHealth(), getTasks()]);
+    const [health, taskList] = await Promise.all([getHealth(), getTasks(new Request("http://localhost/api/tasks"))]);
     expect(health.status).toBe(500);
     expect(taskList.status).toBe(500);
   });
