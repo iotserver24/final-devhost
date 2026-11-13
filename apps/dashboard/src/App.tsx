@@ -12,6 +12,15 @@ import {
 import { useIncidents, type DataMode } from './useIncidents';
 import { AgentTranscript } from './AgentTranscript';
 import { useActivity } from './useActivity';
+import {
+  ActionAudit,
+  AffectedServices,
+  EscalationBanner,
+  EvidenceItems,
+  incidentHeadline,
+  RecoveryMetrics,
+  Verification,
+} from './incident-detail';
 
 const mode: DataMode = process.env.NEXT_PUBLIC_DATA_MODE === 'fixtures' ? 'fixtures' : 'live';
 
@@ -85,17 +94,16 @@ function IncidentCard({ incident, selected, onSelect }: { incident: Incident; se
     <button className={`incident-card${selected ? ' selected' : ''}`} onClick={onSelect} type="button">
       <span className="card-topline"><span>{formatDate(incident.detectedAt)}</span><StatusPill status={incident.status} /></span>
       <strong>{kindLabels[incident.kind]}</strong>
-      <span className="card-meta">{decisionSummary(incident)} · {shortSha(incident.commitSha)} · {incident.probePath ?? 'build'}</span>
-      <span className="card-summary">{incident.events.at(-1)?.message ?? incident.evidence[0] ?? 'No evidence recorded.'}</span>
+      <span className="card-meta">
+        {incident.targetId ? `${incident.targetId} · ` : ''}{decisionSummary(incident)} · {shortSha(incident.commitSha)} · {incident.probePath ?? 'build'}
+      </span>
+      {(incident.classification || incident.evidenceSources?.length) && <span className="card-tags">
+        {incident.classification && <span className={`tag tag-${incident.classification}`}>{incident.classification}</span>}
+        {incident.evidenceSources?.map(source => <span className="tag" key={source}>{source}</span>)}
+      </span>}
+      <span className="card-summary">{incidentHeadline(incident)}</span>
     </button>
   );
-}
-
-function Evidence({ incident }: { incident: Incident }) {
-  return <section className="panel evidence-panel">
-    <div className="section-heading"><h2>Evidence</h2><span>{incident.evidence.length} entries</span></div>
-    <ul className="evidence-list">{incident.evidence.map((item, index) => <li key={`${item}-${index}`}>{item}</li>)}</ul>
-  </section>;
 }
 
 function Timeline({ events }: { events: Incident['events'] }) {
@@ -144,6 +152,10 @@ function LiveActivity({ incidentId }: { incidentId: string }) {
   </section>;
 }
 
+function crashLine(log: { level: string; message: string; statusCode?: number; isError: boolean }): boolean {
+  return log.isError || (log.statusCode !== undefined && log.statusCode >= 500) || /crash|task service failed|unhandled|exception/i.test(`${log.level} ${log.message}`);
+}
+
 type WatchLog = {
   id: string;
   level: string;
@@ -163,9 +175,9 @@ function WatchTelemetry({ watch }: { watch: WatchState | null }) {
   const logs = watch?.logs ?? [];
   const deployment = watch?.deployment ?? null;
   const probeEvery = everyLabel(watch?.intervalMs ?? 30_000);
-  const logsEvery = everyLabel(watch?.logsIntervalMs ?? 60_000);
+  const logsEvery = everyLabel(watch?.logsIntervalMs ?? 30_000);
   const nextProbe = nextIn(watch?.checkedAt, watch?.intervalMs ?? 30_000, now);
-  const nextLogs = nextIn(watch?.logsCheckedAt, watch?.logsIntervalMs ?? 60_000, now);
+  const nextLogs = nextIn(watch?.logsCheckedAt, watch?.logsIntervalMs ?? 30_000, now);
   return <section className="panel telemetry-panel" aria-live="polite">
     <div className="section-heading">
       <h2>Production telemetry</h2>
@@ -200,14 +212,20 @@ function WatchTelemetry({ watch }: { watch: WatchState | null }) {
     {watch?.logsError && <p className="telemetry-error" role="status">{watch.logsError}</p>}
     {!watch && <p className="telemetry-empty">Live telemetry appears when the controller is running.</p>}
     {watch && !watch.logsError && logs.length === 0 && <p className="telemetry-empty">No runtime logs returned for the current deployment.</p>}
-    {logs.length > 0 && <ol className="runtime-logs">
-      {logs.map(log => <li key={log.id} className={log.isError ? 'runtime-log-error' : ''}>
+    {logs.length > 0 && <>
+      {logs.some(log => crashLine(log)) && <div className="crash-highlight" role="status">
+        <strong>Crash in these lines</strong>
+        <ul>{logs.filter(log => crashLine(log)).slice(-8).map(log => <li key={`crash-${log.id}`}>{log.statusCode ? `HTTP ${log.statusCode} ` : ''}{log.message}</li>)}</ul>
+      </div>}
+      <ol className="runtime-logs">
+      {logs.map(log => <li key={log.id} className={crashLine(log) ? 'runtime-log-error runtime-log-crash' : ''}>
         <time dateTime={new Date(log.timestamp).toISOString()}>{formatTime(new Date(log.timestamp).toISOString())}</time>
-        <span className="runtime-log-level">{log.level}</span>
+        <span className="runtime-log-level">{crashLine(log) ? 'crash' : log.level}</span>
         {log.statusCode !== undefined && <span className="runtime-log-status">HTTP {log.statusCode}</span>}
         <p>{log.message}</p>
       </li>)}
-    </ol>}
+    </ol>
+    </>}
   </section>;
 }
 
@@ -234,7 +252,7 @@ function Detail({ incident, watch }: { incident: Incident; watch: WatchState | n
     <section className="trigger" aria-label="What triggered this incident">
       <div>
         <span className="eyebrow">What triggered this</span>
-        <h2>{detected?.message ?? incident.evidence[0] ?? 'The controller recorded a failure.'}</h2>
+        <h2>{detected?.message ?? incidentHeadline(incident)}</h2>
         <p>{incident.probePath ? `Probe ${incident.probePath}` : 'Deployment status check'}{incident.deploymentUrl ? ` on ${hostOf(incident.deploymentUrl)}` : ''}.</p>
       </div>
       <ul>
@@ -259,9 +277,14 @@ function Detail({ incident, watch }: { incident: Incident; watch: WatchState | n
       <li>{incident.status === 'pr_opened' ? 'Fix — a pull request is open for that bad commit.' : incident.status === 'remediation_failed' ? 'Fix — the latest attempt failed; see the timeline for details.' : incident.status === 'needs_human' ? 'Fix — waiting for the next automatic attempt.' : 'Fix — the agent is working on the bad commit.'}</li>
     </ol>}
     {(incident.decision === 'rollback' || rolledBack(incident)) && <p className="caveat">{rollbackCaveat}</p>}
+    <EscalationBanner incident={incident} />
     <WatchTelemetry watch={watch} />
+    <RecoveryMetrics incident={incident} />
+    <AffectedServices incident={incident} />
+    <ActionAudit actions={incident.actions} />
+    <Verification verification={incident.verification} />
     <LiveActivity incidentId={incident.id} />
-    <div className="detail-columns"><Evidence incident={incident} /><Timeline events={incident.events} /></div>
+    <div className="detail-columns"><EvidenceItems items={incident.evidenceItems} fallback={incident.evidence} /><Timeline events={incident.events} /></div>
   </main>;
 }
 
@@ -319,7 +342,7 @@ function LiveWatch({ onWatch }: { onWatch?: (watch: WatchState) => void }) {
   const checked = watch?.checkedAt ? new Date(watch.checkedAt) : null;
   const age = checked ? Math.max(0, Math.round((clock.getTime() - checked.getTime()) / 1000)) : null;
   const probeNext = nextIn(watch?.checkedAt, watch?.intervalMs ?? 30_000, clock);
-  const logsNext = nextIn(watch?.logsCheckedAt, watch?.logsIntervalMs ?? 60_000, clock);
+  const logsNext = nextIn(watch?.logsCheckedAt, watch?.logsIntervalMs ?? 30_000, clock);
   const time = clock.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
   return <div className={`live-watch ${watch?.outcome ?? 'starting'}`} aria-live="polite">
     <strong className="live-clock">{time}</strong>
@@ -358,24 +381,33 @@ function FailureStreak({ watch }: { watch: WatchState | null }) {
   </section>;
 }
 
-function Dashboard() {
+function Dashboard({ onLogout }: { onLogout: () => void }) {
   const [watch, setWatch] = useState<WatchState | null>(null);
   const [showSetup, setShowSetup] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [refresh, setRefresh] = useState(0);
+  const [targetFilter, setTargetFilter] = useState('all');
   const snapshot = useIncidents(mode, selectedId, refresh);
   const selected = snapshot.detail ?? snapshot.incidents[0] ?? null;
-  const counts = useMemo(() => ({ active: snapshot.incidents.filter(item => !['recovered', 'needs_human', 'remediation_failed', 'pr_opened'].includes(item.status)).length, recovered: snapshot.incidents.filter(item => item.status === 'recovered').length }), [snapshot.incidents]);
+  const targets = useMemo(() => [...new Set(snapshot.incidents.map(item => item.targetId).filter((value): value is string => Boolean(value)))], [snapshot.incidents]);
+  const visible = useMemo(() => targetFilter === 'all' ? snapshot.incidents : snapshot.incidents.filter(item => item.targetId === targetFilter), [snapshot.incidents, targetFilter]);
+  const counts = useMemo(() => ({ active: visible.filter(item => !['recovered', 'needs_human', 'remediation_failed', 'pr_opened'].includes(item.status)).length, recovered: visible.filter(item => item.status === 'recovered').length }), [visible]);
 
   return <div className="app-shell">
-    <header className="topbar"><div className="brand"><img className="brand-logo" src="/logo.png" alt="Sentinel logo" /><span>Sentinel <em>deploy watch</em></span></div><div className="topbar-meta"><LiveWatch onWatch={setWatch} /><span className={`mode-dot ${mode}`} />{mode === 'fixtures' ? 'Rehearsal data' : 'Live controller'}<button className="refresh" onClick={() => setShowSetup(value => !value)} type="button">Setup</button><button className="refresh" onClick={() => setRefresh(value => value + 1)} type="button">Refresh</button></div></header>
+    <header className="topbar"><div className="brand"><img className="brand-logo" src="/logo.png" alt="Sentinel logo" /><span>Sentinel <em>deploy watch</em></span></div><div className="topbar-meta"><LiveWatch onWatch={setWatch} /><span className={`mode-dot ${mode}`} />{mode === 'fixtures' ? 'Rehearsal data' : 'Live controller'}<button className="refresh" onClick={() => setShowSetup(value => !value)} type="button">Setup</button><button className="refresh" onClick={() => setRefresh(value => value + 1)} type="button">Refresh</button><button className="refresh" onClick={onLogout} type="button">Log out</button></div></header>
     <FailureStreak watch={watch} />
     <div className="workspace">
-      <aside className="sidebar"><div className="sidebar-heading"><div><p className="eyebrow">Operations</p><h2>Incidents</h2></div><span className="count">{snapshot.incidents.length}</span></div><div className="sidebar-stats"><span><strong>{counts.active}</strong> active</span><span><strong>{counts.recovered}</strong> recovered</span></div>
+      <aside className="sidebar"><div className="sidebar-heading"><div><p className="eyebrow">Operations</p><h2>Incidents</h2></div><span className="count">{visible.length}</span></div><div className="sidebar-stats"><span><strong>{counts.active}</strong> active</span><span><strong>{counts.recovered}</strong> recovered</span></div>
+        {targets.length > 1 && <label className="target-filter">Target
+          <select value={targetFilter} onChange={event => setTargetFilter(event.target.value)}>
+            <option value="all">All targets</option>
+            {targets.map(target => <option key={target} value={target}>{target}</option>)}
+          </select>
+        </label>}
         {snapshot.loading && <p className="state-message">Loading incident evidence…</p>}
         {snapshot.error && <div className="error-box" role="alert"><strong>Controller unavailable</strong><p>{snapshot.error}</p><button onClick={() => setRefresh(value => value + 1)} type="button">Try again</button></div>}
-        {!snapshot.loading && !snapshot.error && snapshot.incidents.length === 0 && <p className="state-message">No incidents recorded yet.</p>}
-        <nav className="incident-list" aria-label="Incidents">{snapshot.incidents.map(incident => <IncidentCard key={incident.id} incident={incident} selected={selected?.id === incident.id} onSelect={() => setSelectedId(incident.id)} />)}</nav>
+        {!snapshot.loading && !snapshot.error && visible.length === 0 && <p className="state-message">No incidents recorded yet.</p>}
+        <nav className="incident-list" aria-label="Incidents">{visible.map(incident => <IncidentCard key={incident.id} incident={incident} selected={selected?.id === incident.id} onSelect={() => setSelectedId(incident.id)} />)}</nav>
       </aside>
       {showSetup ? <Setup onClose={() => setShowSetup(false)} /> : selected ? <Detail incident={selected} watch={watch} /> : <Overview watch={watch} />}
     </div>
@@ -423,8 +455,15 @@ function AuthenticatedApp() {
       .catch(() => undefined)
       .finally(() => setChecking(false));
   }, []);
+  async function logout() {
+    try {
+      await fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' });
+    } catch { /* still leave the desk; the cookie clear is best-effort */ }
+    setAuthenticated(false);
+  }
+
   if (checking) return <main className="login-shell"><p className="muted">Checking dashboard session…</p></main>;
-  return authenticated ? <Dashboard /> : <Login onAuthenticated={() => setAuthenticated(true)} />;
+  return authenticated ? <Dashboard onLogout={() => void logout()} /> : <Login onAuthenticated={() => setAuthenticated(true)} />;
 }
 
 export default function App() {

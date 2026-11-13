@@ -37,12 +37,26 @@ and operator-assistance tool, not a general-purpose monitoring service:
 
 | Component | Responsibility |
 | --- | --- |
-| `apps/controller` | Bun HTTP API, dashboard authentication, polling worker, provider adapters, incident decisions, actions, PostgreSQL persistence, settings, and agent activity streaming. |
-| `apps/dashboard` | Next.js and React incident UI, login/setup screens, API client, and live remediation activity. It reads incidents through the controller; it does not initiate agent runs from the browser. |
-| `apps/sample` | Standalone Next.js app (`TaskFlow`) used as the monitored target and to rehearse healthy, runtime-regression, and persistent-failure scenarios. |
-| `packages/contracts` | Shared incident/event types and the controller/remediator data boundary. |
-| `packages/remediator` | E2B-based fix workflow: clone a configured repository revision, reproduce the failure, produce and validate a patch, then optionally publish a draft PR from the controller environment. |
+| `apps/controller` | Bun HTTP API, dashboard authentication and roles, polling worker, provider adapters (Vercel, Railway, Render, Coolify, VM agent), HTTP error classification, incident decisions, actions, PostgreSQL persistence, settings, Sentry evidence, PR comment follow-up, and agent activity streaming. |
+| `apps/dashboard` | Next.js and React incident UI, login/setup screens, API client, target filtering, and live remediation activity. It reads incidents through the controller; it does not initiate agent runs from the browser. |
+| `apps/sample` | Standalone Next.js app (Fieldnote) used as the monitored target: projects, task board, status filter, and healthy, runtime-regression, and persistent-failure scenarios. |
+| `packages/contracts` | Shared incident/event types, service status, classification, evidence/action/verification/escalation records, and the controller/remediator data boundary. |
+| `packages/remediator` | E2B-based fix workflow: clone a configured repository revision, reproduce the failure, produce and validate a patch, enforce the dependency policy, then optionally publish a draft PR from the controller environment. |
 | `packages/notifier` | Redacted incident report formatting and Slack/SMTP delivery. Notification failures are recorded separately from recovery actions. |
+
+### Feature guides
+
+| Topic | Document |
+| --- | --- |
+| HTTP error classification policy | [`docs/http-classification.md`](./docs/http-classification.md) |
+| Logging, evidence, retention, exclusions | [`docs/logging-evidence.md`](./docs/logging-evidence.md) |
+| Dependency and import policy for AI patches | [`docs/dependency-policy.md`](./docs/dependency-policy.md) |
+| GitHub PR comment follow-up | [`docs/github-pr-followup.md`](./docs/github-pr-followup.md) |
+| VM deployment and guarded rollback | [`docs/vm-deployment.md`](./docs/vm-deployment.md) |
+| Multiple monitored targets | [`docs/multi-target.md`](./docs/multi-target.md) |
+| Sentry evidence (optional) | [`docs/sentry.md`](./docs/sentry.md) |
+| Authentication and authorization | [`docs/authentication.md`](./docs/authentication.md) |
+| Demo scenarios and test status | [`docs/demo-scenarios.md`](./docs/demo-scenarios.md) |
 
 ### Incident flow and safeguards
 
@@ -227,6 +241,12 @@ documented in [`packages/remediator/README.md`](./packages/remediator/README.md)
 The dashboard uses these controller endpoints:
 
 - `GET /api/incidents` and `GET /api/incidents/:id` — incident list and detail
+- `GET /api/services` — per-service status for local demo targets
+- `GET /api/watch` — current monitor state
+- `POST /api/actions/dry-run` — policy evaluation with no mutation
+- `GET /api/broker/audit` — action broker audit trail
+- `GET /api/evidence/sentry` — Sentry evidence summary, when configured
+- `GET /api/audit` — recent sensitive-operation audit entries and configured roles
 - `GET /api/agent/runs` and `GET /api/agent/runs/:id` — local agent-run history
 - `GET /api/agent/runs/:id/events` — server-sent event stream of safe progress
 - `GET /api/auth/session`, `POST /api/auth/login`, and

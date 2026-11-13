@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import type { Incident } from '@nexathon/contracts';
 import { redact, redactFull, safeLink } from '@nexathon/notifier/format';
 import { decideIncident, type ProbeResult } from './decision';
+import { classifyProbe, defaultPolicy, mayActOn, type Classification, type ClassificationPolicyConfig } from './classify';
 import type { IncidentStore } from './incident-store';
 
 export interface Deployment {
@@ -96,6 +97,12 @@ export interface MonitorOptions {
   now?: () => Date;
   wait?: (milliseconds: number) => Promise<void>;
   actions?: MonitorActions;
+  /** HTTP status classification policy; defaults to the documented policy. */
+  classificationPolicy?: ClassificationPolicyConfig;
+  /** Optional advisory evidence from an external source such as Sentry. */
+  sentryEvidence?: () => Promise<string[]>;
+  /** Optional advisory evidence from PostHog error tracking. */
+  posthogEvidence?: () => Promise<string[]>;
   /** Same error repeated within one fetched batch, independent of the HTTP streak. */
   logSignal?: { evidence: string; occurrences: number; logs: RuntimeLog[]; deploymentId: string };
 }
@@ -170,7 +177,7 @@ async function saveAndNotify(
   await options.store.save(incident);
 }
 
-async function finishRemediation(
+export async function finishRemediation(
   incident: Incident,
   options: MonitorOptions,
 ): Promise<void> {
@@ -398,6 +405,25 @@ export async function checkProject(options: MonitorOptions): Promise<MonitorResu
     };
   }
 
+  // Classify the observed status before treating this as actionable. Providers
+  // that cannot report a status code keep the previous behaviour.
+  let classification: Classification | undefined;
+  if (!options.logSignal && currentResponse.statusCode !== undefined) {
+    classification = classifyProbe({
+      route: probePath,
+      statusCode: currentResponse.statusCode,
+      occurrences: streak.consecutiveFailures,
+    }, options.classificationPolicy ?? defaultPolicy);
+    if (!mayActOn(classification.classification) && classification.classification !== 'unknown') {
+      return {
+        action: 'monitor',
+        consecutiveFailures: streak.consecutiveFailures,
+        reason: `HTTP ${classification.statusCode} classified as ${classification.classification}. ${classification.reason}`,
+        probe: currentResponse,
+      };
+    }
+  }
+
   const id = incidentId(options.projectId, current.id, probePath);
   const existing = await options.store.get(id);
   if (existing) {
@@ -504,6 +530,35 @@ export async function checkProject(options: MonitorOptions): Promise<MonitorResu
 
   if (options.logSignal) {
     incident.runtimeLogs = runtimeLogContext(options.logSignal.logs);
+  }
+  if (classification) {
+    incident.classification = classification.classification;
+    incident.evidence.push(evidence(`HTTP classification: ${classification.classification}. ${classification.reason}`));
+    incident.events.push(event(now().toISOString(), 'classification', `${classification.classification}: ${classification.reason}`));
+  }
+  if (options.sentryEvidence) {
+    try {
+      const lines = await options.sentryEvidence();
+      if (lines.length) {
+        incident.evidence.push(...lines.map(line => evidence(line)));
+        incident.evidenceSources = [...new Set([...(incident.evidenceSources ?? []), 'sentry'])];
+        incident.events.push(event(now().toISOString(), 'evidence', `${lines.length} Sentry evidence line(s) attached as advisory context.`));
+      }
+    } catch {
+      // An evidence source outage must never block incident handling.
+    }
+  }
+  if (options.posthogEvidence) {
+    try {
+      const lines = await options.posthogEvidence();
+      if (lines.length) {
+        incident.evidence.push(...lines.map(line => evidence(line)));
+        incident.evidenceSources = [...new Set([...(incident.evidenceSources ?? []), 'posthog'])];
+        incident.events.push(event(now().toISOString(), 'evidence', `${lines.length} PostHog evidence line(s) attached as advisory context.`));
+      }
+    } catch {
+      // An evidence source outage must never block incident handling.
+    }
   }
   await appendDeploymentLogs(incident, options, current.id);
 

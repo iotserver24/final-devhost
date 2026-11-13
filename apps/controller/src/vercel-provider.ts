@@ -245,11 +245,11 @@ export class VercelProvider implements DeploymentProvider {
       return [{
         id: text(item?.id) ?? text(item?.serial) ?? `${deploymentId}-event-${index}`,
         level,
-        message: redact(message, 600),
+        message: redactFull(message),
         timestamp,
         isError: level === 'error',
       }];
-    }).slice(-50);
+    }).slice(-200);
   }
 
   async getRuntimeLogs(projectId: string, deploymentId: string): Promise<RuntimeLog[]> {

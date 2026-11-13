@@ -23,7 +23,7 @@ describe("API fault scenarios", () => {
 
     const [health, taskList, summary] = await Promise.all([
       getHealth(),
-      getTasks(),
+      getTasks(new Request("http://localhost/api/tasks")),
       getSummary()
     ]);
     const taskBody = await taskList.json();
@@ -32,12 +32,12 @@ describe("API fault scenarios", () => {
     expect(health.status).toBe(200);
     expect(taskList.status).toBe(200);
     expect(taskBody.ok).toBe(true);
-    expect(taskBody.count).toBe(4);
+    expect(taskBody.count).toBe(7);
     expect(summary.status).toBe(200);
     expect(summaryBody.summary).toEqual({
-      total: 4,
-      todo: 2,
-      inProgress: 1,
+      total: 7,
+      todo: 4,
+      inProgress: 2,
       done: 1
     });
   });
@@ -47,7 +47,7 @@ describe("API fault scenarios", () => {
 
     const [health, taskList, summary] = await Promise.all([
       getHealth(),
-      getTasks(),
+      getTasks(new Request("http://localhost/api/tasks")),
       getSummary()
     ]);
 
@@ -61,7 +61,7 @@ describe("API fault scenarios", () => {
 
     const [health, taskList, summary] = await Promise.all([
       getHealth(),
-      getTasks(),
+      getTasks(new Request("http://localhost/api/tasks")),
       getSummary()
     ]);
 

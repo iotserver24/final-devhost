@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
-import { getFaultMode } from "@/lib/tasks";
-import { getFault } from "@/lib/faults";
+import { getFault, getFaultMode } from "@/lib/faults";
 
 export const dynamic = "force-dynamic";
 
@@ -11,6 +10,13 @@ export function GET() {
   if (fault.kind === "bad-deployment" || mode === "runtime") {
     return NextResponse.json(
       { ok: false, service: "task-manager", error: "Current revision fails its probe" },
+      { status: 500 }
+    );
+  }
+
+  if (mode === "ambiguous") {
+    return NextResponse.json(
+      { ok: false, service: "task-manager", error: "Demo ambiguous state: health probe reports failure while the service reports ready" },
       { status: 500 }
     );
   }

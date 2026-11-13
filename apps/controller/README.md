@@ -31,7 +31,7 @@ The deployment `runtime-logs` REST endpoint is a live stream rather than this
 historical query.
 
 The provider defaults to a one-minute window. Scheduled monitoring pulls every
-`CONTROLLER_LOGS_INTERVAL_MS` (60 seconds by default) with 30 seconds of overlap
+`CONTROLLER_LOGS_INTERVAL_MS` (30 seconds by default) with 30 seconds of overlap
 to allow for ingestion delays; stored event IDs deduplicate overlapping logs.
 Queries stay within Hobby's one-hour retention and follow up to ten pages.
 When the same error occurs at least three times in a single fetched batch,

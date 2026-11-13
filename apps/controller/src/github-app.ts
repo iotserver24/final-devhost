@@ -107,19 +107,31 @@ export async function installationExists(appId: string, pem: string, installatio
   return response.ok;
 }
 
+/** Next page from a GitHub `Link` header. Numbered pages can stop short of `total_count`. */
+export function nextPageUrl(linkHeader: string | null): string | null {
+  if (!linkHeader) return null;
+  for (const part of linkHeader.split(',')) {
+    const match = part.match(/<([^>]+)>;\s*rel="next"/);
+    if (match?.[1]?.startsWith('https://api.github.com/')) return match[1];
+  }
+  return null;
+}
+
 export async function listInstallationRepositories(appId: string, pem: string, installationId: string): Promise<string[]> {
   const token = await installationToken(appId, pem, installationId, 'read');
   const names: string[] = [];
-  for (let page = 1; page <= 30; page += 1) {
-    const response = await fetch(`https://api.github.com/installation/repositories?per_page=100&page=${page}`, {
+  let url: string | null = 'https://api.github.com/installation/repositories?per_page=100';
+  for (let page = 0; url && page < 40; page += 1) {
+    const response = await fetch(url, {
       headers: { Accept: 'application/vnd.github+json', Authorization: `Bearer ${token}`, 'User-Agent': 'sentinel' },
     });
     if (!response.ok) throw new Error('GitHub did not list the installation repositories.');
     const body = await response.json() as { total_count?: number };
-    const pageNames = installationRepositoryNames(body);
-    names.push(...pageNames);
+    names.push(...installationRepositoryNames(body));
+    const next = nextPageUrl(response.headers.get('link'));
     const total = body.total_count;
-    if (pageNames.length < 100 || (typeof total === 'number' && names.length >= total)) break;
+    const unique = new Set(names);
+    url = next && (typeof total !== 'number' || unique.size < total) ? next : null;
   }
   return [...new Set(names)].sort((left, right) => left.localeCompare(right));
 }

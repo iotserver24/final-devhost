@@ -31,7 +31,7 @@ abstract class HttpProvider implements DeploymentProvider {
     if (!validPath(path)) throw new Error('Invalid production probe path.');
     try {
       const response = await this.fetchImpl(new URL(path, url), { redirect: 'error', signal: AbortSignal.timeout(this.timeoutMs), headers: { Accept: 'application/json' } });
-      return { result: response.ok ? 'pass' : 'fail', evidence: `HTTP ${response.status} from ${new URL(url).hostname}${path}` };
+      return { result: response.ok ? 'pass' : 'fail', statusCode: response.status, evidence: `HTTP ${response.status} from ${new URL(url).hostname}${path}` };
     } catch { throw new Error('Deployment probe failed or timed out.'); }
   }
   async probeProduction(projectId: string, path: string) { this.assertProject(projectId); return this.probe(this.productionUrl, path); }

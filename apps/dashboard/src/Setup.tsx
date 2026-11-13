@@ -34,8 +34,13 @@ export function Setup({ onClose }: { onClose: () => void }) {
   const [vercelListNote, setVercelListNote] = useState('Project list has not loaded.');
 
   const loadSettings = useCallback(async (signal?: AbortSignal) => {
-    const response = await fetch('/api/settings', { headers: { Accept: 'application/json' }, signal });
-    if (!response.ok) throw new Error('The controller did not return integration settings.');
+    const response = await fetch('/api/settings', { credentials: 'same-origin', headers: { Accept: 'application/json' }, signal });
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({})) as { error?: string };
+      if (response.status === 401) throw new Error('Sign in again. The controller rejected this session.');
+      if (response.status === 403) throw new Error('This account cannot open integration settings. Sign in with the administrator account, not the viewer account.');
+      throw new Error(body.error || `The controller did not return integration settings (HTTP ${response.status}).`);
+    }
     const body = await response.json() as { fields: SettingField[] };
     setFields(body.fields);
     setDraft(current => Object.fromEntries(body.fields.map(field => [field.key, current[field.key] ?? (field.secret ? '' : field.value)])));
@@ -51,6 +56,8 @@ export function Setup({ onClose }: { onClose: () => void }) {
 
   const field = useMemo(() => new Map(fields.map(item => [item.key, item])), [fields]);
   const githubReady = Boolean(field.get('GITHUB_INSTALLATION_ID')?.configured);
+  const repoMatches = repos.filter(repo => repo.toLowerCase().includes(repoQuery.trim().toLowerCase()));
+  const visibleRepos = repoQuery.trim() ? repoMatches.slice(0, 12) : [];
   const vercelReady = Boolean(field.get('VERCEL_ACCESS_TOKEN')?.configured);
   const botSlug = field.get('GITHUB_APP_SLUG')?.value || 'not configured';
   const monitorOn = field.get('CONTROLLER_MONITOR_ENABLED')?.value === 'true';
@@ -59,17 +66,19 @@ export function Setup({ onClose }: { onClose: () => void }) {
     if (!fields.length) return;
     if (!githubReady) { setGithubListNote('GitHub access is not connected, so there is no repository list.'); return; }
     const abort = new AbortController();
-    void fetch('/api/github/repos', { headers: { Accept: 'application/json' }, signal: abort.signal })
+    const query = repoQuery.trim();
+    void fetch(`/api/github/repos${query ? `?q=${encodeURIComponent(query)}` : ''}`, { cache: 'no-store', headers: { Accept: 'application/json' }, signal: abort.signal })
       .then(async response => {
-        const body = await response.json().catch(() => ({})) as { repositories?: string[]; error?: string };
+        const body = await response.json().catch(() => ({})) as { repositories?: string[]; total?: number; error?: string };
         if (!response.ok) { setGithubListNote(body.error || `Repository list failed (${response.status}).`); return; }
         const names = body.repositories ?? [];
         setRepos(names);
-        setGithubListNote(names.length ? `${names.length} repositories from the bot install.` : 'The bot is connected and has no repositories.');
+        const total = body.total ?? names.length;
+        setGithubListNote(total ? `${total} repositories from the bot install.` : 'The bot is connected and has no repositories.');
       })
       .catch(() => { if (!abort.signal.aborted) setGithubListNote('Repository list did not load.'); });
     return () => abort.abort();
-  }, [fields.length, githubReady]);
+  }, [fields.length, githubReady, repoQuery]);
 
   useEffect(() => {
     if (!fields.length) return;
@@ -225,13 +234,15 @@ export function Setup({ onClose }: { onClose: () => void }) {
         <span>Search repositories</span>
         <input value={repoQuery} placeholder="owner/name" onChange={event => setRepoQuery(event.target.value)} />
       </label>
-      <label className="setup-field">
-        <span>Repository</span>
-        <select value={repos.includes(draft.REMEDIATOR_REPOSITORY ?? '') ? draft.REMEDIATOR_REPOSITORY : ''} onChange={event => void choose('REMEDIATOR_REPOSITORY', event.target.value)}>
-          <option value="">Choose a repository</option>
-          {repos.filter(repo => repo.toLowerCase().includes(repoQuery.trim().toLowerCase())).map(repo => <option key={repo} value={repo}>{repo}</option>)}
-        </select>
-      </label>
+      <div className="repo-results">
+        <span>{draft.REMEDIATOR_REPOSITORY ? `Selected: ${draft.REMEDIATOR_REPOSITORY}` : 'No repository selected.'}</span>
+        {!repoQuery.trim() && <p>Type part of the name. {repos.length} repositories are loaded from the bot install.</p>}
+        {repoQuery.trim() && visibleRepos.length === 0 && <p>No loaded repository matches that name. The bot only lists repositories it was granted.</p>}
+        {visibleRepos.length > 0 && <ul>
+          {visibleRepos.map(repo => <li key={repo}><button type="button" className={repo === draft.REMEDIATOR_REPOSITORY ? 'selected' : ''} onClick={() => void choose('REMEDIATOR_REPOSITORY', repo)}>{repo}</button></li>)}
+        </ul>}
+        {repoQuery.trim() && repoMatches.length > visibleRepos.length && <p>Showing {visibleRepos.length} of {repoMatches.length}. Keep typing to narrow the list.</p>}
+      </div>
     </section>}
 
     <section className="setup-hero" aria-labelledby="vercel-title">

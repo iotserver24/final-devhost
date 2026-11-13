@@ -1,13 +1,26 @@
+# Sentinel: controller, PostgreSQL, TaskFlow sample target, and its dependency service.
+#
+# Copy apps/controller/.env.example to apps/controller/.env and configure it.
+#
+#   docker compose up -d
+
 services:
   controller:
-    build: .
+    build:
+      context: .
+      args:
+        BUN_VERSION: ${BUN_VERSION:-1.3.11}
+        CONTROLLER_PORT: ${CONTROLLER_PORT:-8787}
+        INSTALL_GH_CLI: ${INSTALL_GH_CLI:-true}
+    image: ${CONTROLLER_IMAGE:-sentinel-controller}:${CONTROLLER_TAG:-local}
     env_file:
-      - apps/controller/.env
+      - ${CONTROLLER_ENV_FILE:-apps/controller/.env}
     environment:
       CONTROLLER_HOST: 0.0.0.0
-      CONTROLLER_PORT: 8787
+      CONTROLLER_PORT: ${CONTROLLER_PORT:-8787}
+      DATABASE_URL: ${POSTGRES_URL:-postgres://sentinel:sentinel@postgres:5432/sentinel}
     ports:
-      - "8787:8787"
+      - "${CONTROLLER_PORT:-8787}:${CONTROLLER_PORT:-8787}"
     depends_on:
       postgres:
         condition: service_healthy
@@ -20,18 +33,19 @@ services:
   postgres:
     image: postgres:13
     environment:
-      POSTGRES_USER: user
-      POSTGRES_PASSWORD: password
-      POSTGRES_DB: sentinel
+      POSTGRES_USER: ${POSTGRES_USER:-sentinel}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sentinel}
+      POSTGRES_DB: ${POSTGRES_DB:-sentinel}
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U user -d sentinel"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
       retries: 10
+      start_period: 10s
 
   sample:
     build:
