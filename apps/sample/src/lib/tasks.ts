@@ -76,6 +76,7 @@ export const tasks: Task[] = [
   }
 ];
 
+<<<<<<< Updated upstream
 export function getTask(id: number): Task | undefined {
   return tasks.find((task) => task.id === id);
 }
@@ -85,3 +86,6 @@ export function getFaultMode(): "healthy" | "runtime" | "persistent" {
   if (mode === "runtime" || mode === "persistent") return mode;
   return "healthy";
 }
+=======
+export { getFaultMode } from "@/lib/faults";
+>>>>>>> Stashed changes
