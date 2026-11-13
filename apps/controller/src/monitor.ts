@@ -594,8 +594,10 @@ export async function checkProject(options: MonitorOptions): Promise<MonitorResu
     }
     const fixAttempts = existing.events.filter(item => item.type === 'remediation_started').length;
     const heldForReview = [...existing.events].reverse().find(item => item.type === 'awaiting_comment' || item.type === 'review_resumed' || item.type === 'draft_pr')?.type === 'awaiting_comment';
-    const interruptedBeforeFix = existing.status === 'detected' && existing.decision === 'fix_pr'
-      && now().getTime() - lastActivity > 2 * 60_000;
+    const lastFixStage = [...existing.events].reverse().find(item =>
+      item.type === 'remediation_retry' || item.type === 'remediation_started' || item.type === 'draft_pr')?.type;
+    const interruptedBeforeFix = existing.decision === 'fix_pr' && now().getTime() - lastActivity > 2 * 60_000
+      && (existing.status === 'detected' || (existing.status === 'remediating' && lastFixStage === 'remediation_retry'));
     const fixStoppedEarly = (['needs_human', 'remediation_failed'].includes(existing.status) || interruptedBeforeFix) && fixAttempts < 10
       && !existing.events.some(item => item.type === 'draft_pr')
       && !heldForReview;

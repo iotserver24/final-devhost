@@ -198,6 +198,25 @@ describe('monitor safety boundaries', () => {
     expect(saved?.events.some(item => item.type === 'remediation_started')).toBe(true);
   });
 
+  it('retries an interrupted pre-dispatch notification but leaves an active sandbox alone', async () => {
+    for (const stage of ['remediation_retry', 'remediation_started'] as const) {
+      let attempts = 0;
+      const { implementation } = provider();
+      const options = makeOptions(implementation, {
+        now: () => new Date(at.getTime() + 121_000),
+        actions: { remediate: async () => { attempts++; return { ok: false, message: 'Test fix ended safely.' }; } },
+      });
+      await options.store.save({
+        id: incidentId(projectId, current.id, '/api/tasks'), projectId, kind: 'runtime_regression',
+        status: 'remediating', decision: 'fix_pr', deploymentId: current.id, probePath: '/api/tasks',
+        detectedAt: at.toISOString(), evidence: ['HTTP 500'],
+        events: [{ at: at.toISOString(), type: stage, message: 'Fix state.' }],
+      });
+      await driveFailure(options);
+      expect(attempts).toBe(stage === 'remediation_retry' ? 1 : 0);
+    }
+  });
+
   it('records unavailable remediation after rollback fails without retrying rollback', async () => {
     let rollbacks = 0;
     const { implementation } = provider({
