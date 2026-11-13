@@ -64,7 +64,8 @@ export async function applyStoredSettings(store: Pick<IncidentStore, 'readSettin
     else delete process.env[key];
   }
   for (const [key, value] of Object.entries(saved)) {
-    if (allowed.has(key) && !clientOwned.has(key) && value) process.env[key] = value;
+    // Host environment wins. A saved dashboard value fills a key the host left empty.
+    if (allowed.has(key) && !clientOwned.has(key) && value && !process.env[key]) process.env[key] = value;
   }
 }
 
@@ -77,11 +78,12 @@ export function createSettingsApi(store: Pick<IncidentStore, 'readSettings' | 'w
       return Response.json({
         restartRequired: true,
         fields: settingFields.filter(field => !field.hidden).map(field => {
-          const value = saved[field.key] || (field.clientOwned ? '' : process.env[field.key] || '');
+          const fromHost = !field.clientOwned ? process.env[field.key] || '' : '';
+          const value = fromHost || saved[field.key] || '';
           return {
             ...field,
             configured: Boolean(value),
-            source: saved[field.key] ? 'saved' : value ? 'environment' : 'missing',
+            source: fromHost ? 'environment' : saved[field.key] ? 'saved' : 'missing',
             value: field.secret ? '' : value,
           };
         }),
