@@ -4,6 +4,8 @@
 #
 #   docker compose up -d controller
 #   docker compose --profile demo up -d
+#   docker compose --profile vm up -d vm-agent
+#   docker compose --profile airflow up -d airflow
 
 services:
   controller:
@@ -87,6 +89,48 @@ services:
       timeout: 5s
       retries: 3
       start_period: 15s
+
+  # Restricted agent for one local app. No Docker socket and no host shell.
+  vm-agent:
+    profiles: ["vm"]
+    image: oven/bun:1.3.11
+    working_dir: /tmp
+    command: ["bun", "/opt/sentinel/apps/vm-agent/src/server.ts"]
+    volumes:
+      - .:/opt/sentinel:ro
+    tmpfs:
+      - /tmp
+    environment:
+      VM_AGENT_HOST: 0.0.0.0
+      VM_AGENT_PORT: "8443"
+      VM_AGENT_TOKEN: ${VM_AGENT_TOKEN:-local-vm-demo-token}
+      VM_APPLICATION: taskflow
+    ports:
+      - "127.0.0.1:8443:8443"
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+
+  # Read-only schedule of the incident steps. It does not receive GitHub or SMTP secrets.
+  airflow:
+    profiles: ["airflow"]
+    image: apache/airflow:2.10.5-python3.12
+    environment:
+      AIRFLOW_HOME: /tmp/airflow
+      AIRFLOW__CORE__EXECUTOR: SequentialExecutor
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/dags
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: sqlite:////tmp/airflow/airflow.db
+      CONTROLLER_URL: ""
+    volumes:
+      - ./ops/airflow/dags:/opt/airflow/dags:ro
+    tmpfs:
+      - /tmp
+    command: ["standalone"]
+    ports:
+      - "127.0.0.1:8088:8080"
+    security_opt:
+      - no-new-privileges:true
 
 volumes:
   postgres_data:

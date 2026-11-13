@@ -1,0 +1,5 @@
+{
+  "allowed": ["next", "react", "react-dom"],
+  "denied": ["event-stream", "left-pad"],
+  "maxAddedDependencies": 1
+}

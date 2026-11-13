@@ -102,11 +102,13 @@ rollback target. Restoring means starting the previous tag, not rebuilding it.
 | Area | Status |
 | --- | --- |
 | Provider logic, scoping, guarded rollback, dry-run, bounded logs, credential handling | **Unit tested** against a fake transport (`tests/vm-provider.test.ts`) |
-| Agent contract behaviour | Documented; the reference agent implementation must enforce it |
-| Real VM end-to-end rollout and rollback | **Not tested** — requires a VM, an agent deployment, and a token |
-| Docker image build and compose profiles | Configuration reviewed; not built in this environment |
+| Agent contract behaviour | **Tested** against `apps/vm-agent` on `127.0.0.1` (`tests/vm-agent.integration.test.ts`) |
+| Local rollback of `sentinel-demo-app:broken` to `sentinel-demo-app:good` | **Tested** through the same agent. One rollback, then a second attempt is refused |
+| Cloud VM rollout | **Not tested** — the agent above is local, not a remote machine |
+| Docker image build and compose profiles | `vm` and `airflow` profiles are defined. Image build of the Next.js demo app was not required for the agent test |
 
-To finish the live test you need: one VM, the agent deployed with an allowlisted
-application and two recorded deployments, TLS (or a documented local tunnel), a
-bearer token in the controller environment, and `CONTROLLER_TARGETS` pointing at
-the agent.
+The local check is `bun test apps/controller/tests/vm-agent.integration.test.ts`.
+A cloud VM is still a separate deployment: put the same agent on that host with
+`VM_AGENT_TOKEN`, allow one application, and point `VM_AGENT_URL` at it.
+`docker compose --profile vm up -d vm-agent` starts the agent on `127.0.0.1:8443`
+without a Docker socket.

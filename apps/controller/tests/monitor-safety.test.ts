@@ -243,6 +243,28 @@ describe('monitor safety boundaries', () => {
     expect(calls.rollback).toBe(0);
   });
 
+  it('notifies before the fix and still remediates when mail fails', async () => {
+    const order: string[] = [];
+    const { implementation } = provider({ probeImmutableDeployment: async () => probe('fail') });
+    const options = makeOptions(implementation, {
+      actions: {
+        notify: async () => {
+          order.push('notify');
+          throw new Error('smtp down');
+        },
+        remediate: async () => {
+          order.push('remediate');
+          return { ok: true, kind: 'waiting', message: 'Waiting for a comment on issue #3 before writing the fix. sandbox=sb' };
+        },
+      },
+    });
+    const result = await driveFailure(options);
+    expect(result.action).toBe('incident');
+    expect(order[0]).toBe('notify');
+    expect(order.indexOf('notify')).toBeLessThan(order.indexOf('remediate'));
+    expect(order.filter(step => step === 'remediate')).toHaveLength(1);
+  });
+
   it('records a notification failure without losing the incident', async () => {
     const { implementation } = provider({ probeImmutableDeployment: async () => probe('fail') });
     const options = makeOptions(implementation, {

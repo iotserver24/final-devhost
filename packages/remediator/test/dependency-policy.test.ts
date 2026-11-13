@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, test } from 'bun:test';
 import { addedDependencies, addedImports, checkPatch, defaultPolicy, parsePolicyConfig } from '../src/dependency-policy';
 import { assertDependencyPolicy, validatePatch } from '../src/pr-publisher';
@@ -110,6 +111,25 @@ describe('dependency policy: tamper resistance', () => {
 });
 
 describe('dependency policy: config parsing', () => {
+  test('the checked-in allowlist permits next and rejects left-pad', () => {
+    const policy = parsePolicyConfig(readFileSync(new URL('../../../config/dependency-policy.json', import.meta.url), 'utf8'));
+    expect(policy.allowed).toEqual(['next', 'react', 'react-dom']);
+    expect(policy.denied).toEqual(['event-stream', 'left-pad']);
+    expect(policy.maxAddedDependencies).toBe(1);
+    expect(checkPatch(sourcePatch(["import Image from 'next/image';"]), policy)).toEqual([]);
+    expect(checkPatch(sourcePatch(["const pad = require('left-pad');"]), policy).some(item => item.kind === 'denied_dependency')).toBe(true);
+    const tamper = [
+      'diff --git a/config/dependency-policy.json b/config/dependency-policy.json',
+      '--- a/config/dependency-policy.json',
+      '+++ b/config/dependency-policy.json',
+      '@@ -1 +1 @@',
+      '-{}',
+      '+{}',
+      '',
+    ].join('\n');
+    expect(checkPatch(tamper).some(item => item.kind === 'protected_path')).toBe(true);
+  });
+
   test('parses a valid policy file', () => {
     const policy = parsePolicyConfig(JSON.stringify({ allowed: ['zod'], denied: ['evil'], maxAddedDependencies: 0 }));
     expect(policy.allowed).toEqual(['zod']);

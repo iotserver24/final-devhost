@@ -235,6 +235,8 @@ export async function finishRemediation(
   incident: Incident,
   options: MonitorOptions,
 ): Promise<void> {
+  // Mail goes out before the sandbox starts. A failed send does not skip the fix.
+  await saveAndNotify(incident, options);
   const remediate = options.actions?.remediate;
   if (!remediate) {
     incident.status = 'remediation_failed';

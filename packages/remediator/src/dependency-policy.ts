@@ -32,6 +32,7 @@ export const defaultPolicy: DependencyPolicy = {
     'packages/remediator/src/validation.ts',
     'packages/remediator/src/pr-publisher.ts',
     '.dependency-policy.json',
+    'config/dependency-policy.json',
   ],
   maxAddedDependencies: 2,
   suspiciousPatterns: [

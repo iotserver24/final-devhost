@@ -28,7 +28,16 @@ rejection, 40-file cap, and 256 KiB patch cap all still apply first.
 Default policy: no allowlist (existing imports are permitted), no denylist, two
 added dependencies maximum, suspicious install-hook patterns always rejected.
 
-To tighten it, write a JSON file and point the controller at it:
+The demo allowlist is `config/dependency-policy.json`. It allows only the
+sample app's direct dependencies (`next`, `react`, `react-dom`), denies
+`event-stream` and `left-pad`, and allows one added dependency. A patch that
+touches that file is rejected. Point the controller at it with:
+
+```sh
+REMEDIATOR_DEPENDENCY_POLICY_FILE=config/dependency-policy.json
+```
+
+A different file has the same shape:
 
 ```json
 {

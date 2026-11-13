@@ -159,7 +159,7 @@ describe('checkProject', () => {
     expect(result.incident.actionUrl).toBe('https://github.com/example/nexathon/pull/7');
     expect(result.incident.events.map(event => event.type)).toContain('draft_pr');
     expect(result.incident.events.map(event => event.type)).toContain('notification_failed');
-    expect(notifications).toEqual(['pr_opened']);
+    expect(notifications).toEqual(['detected', 'pr_opened']);
   });
 
   it('waits for three failures, then rolls back once and verifies recovery', async () => {
