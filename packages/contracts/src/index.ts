@@ -2,6 +2,9 @@ export const incidentKinds = [
   'runtime_regression',
   'persistent_defect',
   'build_failure',
+  'config_drift',
+  'dependency_failure',
+  'resource_exhaustion',
 ] as const;
 
 export type IncidentKind = (typeof incidentKinds)[number];
@@ -11,6 +14,7 @@ export const incidentStatuses = [
   'investigating',
   'rolling_back',
   'remediating',
+  'verifying',
   'recovered',
   'pr_opened',
   'needs_human',
@@ -18,12 +22,85 @@ export const incidentStatuses = [
 ] as const;
 
 export type IncidentStatus = (typeof incidentStatuses)[number];
-export type IncidentDecision = 'rollback' | 'fix_pr' | 'escalate';
+export type IncidentDecision = 'rollback' | 'fix_pr' | 'escalate' | 'restore_revision' | 'restore_config' | 'restart_service';
 
 export interface IncidentEvent {
   at: string;
   type: string;
   message: string;
+}
+
+export type HealthState = 'healthy' | 'unhealthy' | 'unknown';
+
+/** HTTP error classification recorded on probe-derived incidents. */
+export type IncidentClassification = 'healthy' | 'ignored' | 'warning' | 'incident' | 'unknown';
+
+export type DemoServiceId = 'frontend' | 'task-api' | 'dependency';
+
+export interface ServiceStatus {
+  serviceId: DemoServiceId;
+  health: HealthState;
+  checkedAt: string;
+  detail?: string;
+}
+
+/** One piece of incident evidence. `inferenceOf` indexes into the incident's
+ *  evidence array when this item is an inference rather than an observation. */
+export interface EvidenceItem {
+  source: string;
+  observation: string;
+  at: string;
+  serviceId?: string;
+  inferenceOf?: number;
+}
+
+export type BrokerActionKind = Extract<IncidentDecision, 'restore_revision' | 'restore_config' | 'restart_service'>;
+
+export interface BrokerRequest {
+  kind: BrokerActionKind;
+  target: string;
+  revision?: string;
+  configKey?: string;
+  configValue?: string;
+}
+
+export interface BrokerDecision {
+  allowed: boolean;
+  reason: string;
+  dryRun: boolean;
+}
+
+export interface ActionRecord {
+  kind: BrokerActionKind | 'rollback' | 'fix_pr';
+  target: string;
+  dryRun: boolean;
+  policyResult: 'allowed' | 'denied' | 'dry_run';
+  policyReason: string;
+  attempt: number;
+  executionResult?: 'succeeded' | 'failed' | 'not_executed';
+  at: string;
+}
+
+export interface VerificationRecord {
+  serviceChecks: { serviceId: string; result: 'pass' | 'fail' | 'unknown'; at: string }[];
+  journeyCheck: { result: 'pass' | 'fail' | 'unknown'; at: string; detail?: string };
+  passed: boolean;
+}
+
+export interface EscalationRecord {
+  reason: string;
+  at: string;
+  recommendedNextStep: string;
+  notificationOutcome?: 'sent' | 'failed' | 'not_attempted';
+}
+
+/** Recovery timing. Durations are computed by the API from these fields;
+ *  absent fields mean the value is unknown and must never be invented. */
+export interface IncidentTiming {
+  faultInjectedAt?: string;
+  decidedAt?: string;
+  actionAt?: string;
+  verifiedRecoveryAt?: string;
 }
 
 export interface Incident {
@@ -43,15 +120,18 @@ export interface Incident {
   decision?: IncidentDecision;
   actionUrl?: string;
   events: IncidentEvent[];
-  /** New incident-response fields; optional so older stored incidents stay valid. */
-  services?: IncidentService[];
-  symptoms?: string[];
-  cause?: { summary: string; confidence: 'high' | 'medium' | 'low' | 'unknown' };
-  evidenceItems?: IncidentEvidenceItem[];
-  actions?: IncidentAction[];
-  verification?: IncidentVerification;
-  escalation?: IncidentEscalation;
+  evidenceItems?: EvidenceItem[];
+  actions?: ActionRecord[];
+  verification?: VerificationRecord;
+  escalation?: EscalationRecord;
   timing?: IncidentTiming;
+  affectedServices?: string[];
+  /** Probe result classification; absent for non-probe incidents. */
+  classification?: IncidentClassification;
+  /** Configured target this incident belongs to (multi-target setups). */
+  targetId?: string;
+  /** Evidence sources contributing to this incident, for example `sentry`. */
+  evidenceSources?: string[];
 }
 
 export interface RemediationRequest {
@@ -69,71 +149,4 @@ export interface RemediationResult {
   buildPassed: boolean;
   draftPullRequestUrl?: string;
   failureReason?: string;
-}
-
-export type ServiceHealth = 'healthy' | 'unhealthy' | 'unknown';
-
-/** A service affected by an incident, with its last observed health. */
-export interface IncidentService {
-  id: string;
-  health: ServiceHealth;
-  checkedAt?: string;
-  detail?: string;
-}
-
-/** Structured evidence: observations are measured facts, inferences are conclusions drawn from them. */
-export interface IncidentEvidenceItem {
-  source: string;
-  observation: string;
-  kind: 'observation' | 'inference';
-  at?: string;
-  serviceId?: string;
-}
-
-export type PolicyResult = 'approved' | 'denied' | 'not_evaluated';
-export type ActionResult = 'succeeded' | 'failed' | 'not_executed';
-
-/** One requested action: dry runs carry the policy decision without execution. */
-export interface IncidentAction {
-  kind: string;
-  target: string;
-  dryRun: boolean;
-  policyResult: PolicyResult;
-  policyReason?: string;
-  attempt?: number;
-  result?: ActionResult;
-  resultReason?: string;
-  at?: string;
-}
-
-export interface IncidentVerificationCheck {
-  label: string;
-  serviceId?: string;
-  result: 'pass' | 'fail' | 'unknown';
-  detail?: string;
-}
-
-/** Post-action verification: service health plus the user-facing journey. */
-export interface IncidentVerification {
-  at: string;
-  checks: IncidentVerificationCheck[];
-  journey: { label: string; result: 'pass' | 'fail' | 'unknown'; detail?: string };
-}
-
-/** Why a human is needed and what they should do next. */
-export interface IncidentEscalation {
-  reason: string;
-  at?: string;
-  recommendedNextStep?: string;
-  notificationOutcome?: string;
-}
-
-/** Timestamps for recovery metrics. Unknown times stay undefined; never invent them. */
-export interface IncidentTiming {
-  faultAt?: string;
-  detectedAt: string;
-  decidedAt?: string;
-  actionAt?: string;
-  verifiedRecoveredAt?: string;
-  escalatedAt?: string;
 }

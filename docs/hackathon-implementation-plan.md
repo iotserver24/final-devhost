@@ -1,8 +1,10 @@
 # Sentinel: Problem Statement 4 Implementation Plan
 
+> **Updated 2026-11-12** for the revised problem statement: four failure types are now required (bad deploy, broken config, **resource exhaustion**, failing dependency), and automatic rollback is an explicit demo feature. Scenario table and acceptance matrix below are extended accordingly.
+
 ## Goal
 
-Turn Sentinel into a demonstrable incident-response agent for **“The On-Call Engineer That Doesn't Panic.”** Run a multi-service application on a laptop, introduce three distinct failures live, diagnose each using evidence, safely remediate, verify recovery, and measure recovery time. Demonstrate that unsafe actions are blocked and uncertain cases escalate to a human.
+Turn Sentinel into a demonstrable incident-response agent for **“The On-Call Engineer That Doesn't Panic.”** Run a multi-service application on a laptop, introduce four distinct failures live, diagnose each using evidence, safely remediate, verify recovery, and measure recovery time. Demonstrate that unsafe actions are blocked and uncertain cases escalate to a human.
 
 Build on the existing controller, dashboard, Supercharge/E2B workflow, and cloud providers. Do not present fixtures, mocked tests, or a draft PR as a live recovered service.
 
@@ -33,6 +35,7 @@ Each developer owns the tests relevant to their work. Agree on contracts before 
 | Bad deployment | Switch the task API to a broken demo revision. | Current revision fails; a recent deployment changed; the known-good predecessor passes the equivalent check. | Restore the known-good revision once. | Task API health and a real TaskFlow request pass. |
 | Broken configuration | Apply an invalid allowlisted configuration value. | A recent config change correlates with a service error; a known-good value exists. | Restore that value once. | Service health and the affected user journey pass. |
 | Failing dependency | Stop or deliberately fail the dependency service. | Dependency health fails and the task API reports a dependency error. | Restart the allowlisted dependency once. | Dependency health and the TaskFlow operation pass. |
+| Resource exhaustion | Consume memory/CPU on the task API until it slows or restarts. | Health degrades or OOM events appear in logs while error rates rise; no deployment or config change correlates. | Restart the affected allowlisted service once. | Service health and the TaskFlow operation pass. |
 | Unsafe or ambiguous case | Produce conflicting evidence or request an action against an unrelated target. | Evidence is insufficient or policy rejects the action. | Do not mutate; escalate. | Show rejection, audit entry, and human-attention state. |
 
 The injector may record the expected answer for evaluation, but must not give that answer to Sentinel's diagnosis logic. Diagnosis must use observed evidence. If an action cannot be safely automated, propose it for human approval and explain the limitation.
@@ -57,7 +60,7 @@ The injector may record the expected answer for evaluation, but must not give th
 
 - Make the user-facing workflow genuinely depend on the task API and dependency service; do not simulate service status in the browser.
 - Show each service's real health, last check, and end-to-end request result, including unknown/unreachable states.
-- Add local-only controls for the three faults, an unsafe/ambiguous case, and reset. Show current state and errors.
+- Add local-only controls for the four faults, an unsafe/ambiguous case, and reset. Show current state and errors.
 - Add a clearly labelled dry-run control backed by BE2's real policy evaluation; it must not change the target.
 - Disable conflicting operations while injection or reset is running. Ensure demo controls and reset are restricted to demo resources.
 - Add focused tests for fault controls, reset, unreachable services, and dry-run display.
@@ -70,7 +73,7 @@ The injector may record the expected answer for evaluation, but must not give th
 
 - Implement the frontend, task API, and real dependency service. Document service names, ports, dependencies, health checks, and startup commands.
 - Make Docker Compose start the laptop-scale demo with predictable readiness checks and reproducible initial state.
-- Implement all three faults and reset each independently to a verified known-good state.
+- Implement all four faults and reset each independently to a verified known-good state.
 - Provide observable service identity, health, bounded logs, deployment/configuration revision, and relevant change timestamps. Keep the expected fault label out of diagnosis evidence.
 - Record the actual fault-injection time separately from Sentinel's first-detection time.
 - Provide narrowly scoped ways for the action broker to restore a known-good revision/configuration and restart the designated dependency.
@@ -90,10 +93,10 @@ The injector may record the expected answer for evaluation, but must not give th
 - Escalate ambiguous evidence, missing known-good state, rejected actions, action failures, and failed verification. Surface reasons and record notification failures separately.
 - Record fault, detection, decision, action, verification, and escalation timestamps when available. Calculate durations without inventing unknown timestamps.
 - Expose incident, service-status, action/dry-run, and event interfaces; validate requests and restrict demo operations to the local environment.
-- Test the three diagnosis/action paths, forbidden actions, dry-run no-mutation, single attempt, failed verification, escalation, and timing. Run integration tests with BE1's services.
+- Test the four diagnosis/action paths, forbidden actions, dry-run no-mutation, single attempt, failed verification, escalation, and timing. Run integration tests with BE1's services.
 - Document actual credentials and permissions; demonstrate denied actions. Avoid unsupported claims of absolute security or least privilege.
 
-**Done when:** all three faults produce evidence-backed diagnoses and guarded, verified responses; the unsafe case is denied or escalated; and the dashboard receives accurate state and timings.
+**Done when:** all four faults produce evidence-backed diagnoses and guarded, verified responses; the unsafe case is denied or escalated; and the dashboard receives accurate state and timings.
 
 ## Shared interface agreement
 
@@ -127,9 +130,10 @@ Record actual evidence, expected and actual diagnosis, action and policy decisio
 | Bad deployment | To measure | To measure | To measure | Pending |
 | Broken configuration | To measure | To measure | To measure | Pending |
 | Failing dependency | To measure | To measure | To measure | Pending |
+| Resource exhaustion | To measure | To measure | To measure | Pending |
 | Ambiguous or forbidden action | To measure | Not applicable unless recovered | Not applicable | Pending: prove no unauthorized mutation and show escalation |
 
-**Definition of done:** All services run on a laptop; each of the three faults is introduced live, correctly diagnosed from evidence, safely remediated, and independently verified; recovery times are shown; dry run makes no changes; forbidden actions are rejected; ambiguous/failed cases escalate; and the dashboard explains the outcome. Document exact commands, permissions, and limitations, and distinguish local results from cloud or E2B results.
+**Definition of done:** All services run on a laptop; each of the four faults is introduced live, correctly diagnosed from evidence, safely remediated, and independently verified; recovery times are shown; dry run makes no changes; forbidden actions are rejected; ambiguous/failed cases escalate; and the dashboard explains the outcome. Document exact commands, permissions, and limitations, and distinguish local results from cloud or E2B results.
 
 ## Sponsor tools
 

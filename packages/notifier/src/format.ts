@@ -34,13 +34,15 @@ export function safeLink(value?: string): string | undefined {
 
 export const statusLabels: Record<Incident['status'], string> = {
   detected: 'Detected', investigating: 'Investigating', rolling_back: 'Rolling back',
-  remediating: 'Preparing fix', recovered: 'Recovered', pr_opened: 'PR opened', needs_human: 'Fix pending', remediation_failed: 'Fix attempt failed',
+  remediating: 'Preparing fix', verifying: 'Verifying recovery', recovered: 'Recovered', pr_opened: 'PR opened', needs_human: 'Needs human attention', remediation_failed: 'Fix attempt failed',
 };
 export const kindLabels: Record<Incident['kind'], string> = {
   runtime_regression: 'Fresh runtime regression', persistent_defect: 'Persistent defect', build_failure: 'Failed build',
+  config_drift: 'Broken configuration', dependency_failure: 'Failing dependency', resource_exhaustion: 'Resource exhaustion',
 };
 export const decisionLabels: Record<NonNullable<Incident['decision']>, string> = {
-  rollback: 'Rollback', fix_pr: 'Open fix PR', escalate: 'Investigate and prepare fix',
+  rollback: 'Rollback', fix_pr: 'Open fix PR', escalate: 'Escalate to a human',
+  restore_revision: 'Restore known-good revision', restore_config: 'Restore known-good configuration', restart_service: 'Restart service',
 };
 export const rollbackCaveat = 'After a Vercel rollback, automatic production-domain assignment can be disabled until a human promotes a repaired deployment.';
 

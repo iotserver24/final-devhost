@@ -1,10 +1,92 @@
+# Sentinel: controller, PostgreSQL, and an optional monitored demo app.
+#
+# Copy apps/controller/.env.example to apps/controller/.env and configure it.
+#
+#   docker compose up -d controller
+#   docker compose --profile demo up -d
+
 services:
   controller:
-    build: .
+    build:
+      context: .
+      args:
+        BUN_VERSION: ${BUN_VERSION:-1.3.11}
+        CONTROLLER_PORT: ${CONTROLLER_PORT:-8787}
+        INSTALL_GH_CLI: ${INSTALL_GH_CLI:-true}
+    image: ${CONTROLLER_IMAGE:-sentinel-controller}:${CONTROLLER_TAG:-local}
     env_file:
-      - apps/controller/.env
+      - ${CONTROLLER_ENV_FILE:-apps/controller/.env}
     environment:
       CONTROLLER_HOST: 0.0.0.0
-      CONTROLLER_PORT: 8787
+      CONTROLLER_PORT: ${CONTROLLER_PORT:-8787}
+      DATABASE_URL: ${POSTGRES_URL:-postgres://sentinel:sentinel@postgres:5432/sentinel}
     ports:
-      - "8787:8787"
+      - "${CONTROLLER_PORT:-8787}:${CONTROLLER_PORT:-8787}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    read_only: false
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - ${CONTROLLER_DATA_DIR:-./data}:/app/data
+    healthcheck:
+      test:
+        - CMD
+        - curl
+        - -fsS
+        - http://127.0.0.1:${CONTROLLER_PORT:-8787}/api/auth/session
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  postgres:
+    image: postgres:13
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-sentinel}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sentinel}
+      POSTGRES_DB: ${POSTGRES_DB:-sentinel}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  # Separate image and lifecycle from the controller.
+  demo-app:
+    profiles: ["demo"]
+    build:
+      context: .
+      dockerfile: ${DEMO_DOCKERFILE:-Dockerfile.demo}
+      args:
+        APP_IMAGE_TAG: ${DEMO_APP_TAG:-good}
+    image: ${DEMO_IMAGE:-sentinel-demo-app}:${DEMO_APP_TAG:-good}
+    environment:
+      PORT: ${DEMO_APP_PORT:-3000}
+      DEMO_FAULT_MODE: ${DEMO_FAULT_MODE:-healthy}
+    ports:
+      - "${DEMO_APP_PORT:-3000}:${DEMO_APP_PORT:-3000}"
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test:
+        - CMD
+        - curl
+        - -fsS
+        - http://127.0.0.1:${DEMO_APP_PORT:-3000}/api/health
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  postgres_data:

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { Incident, IncidentAction, IncidentVerification } from '@nexathon/contracts';
+import type { Incident, VerificationRecord } from '@nexathon/contracts';
 import { parseIncident } from '../src/incident';
 import { isVerifiedRecovery, recoveryDurations } from '../src/incident-detail';
 
@@ -9,22 +9,22 @@ const base: Incident = {
   evidence: ['first'], events: [],
 };
 
-const passingVerification: IncidentVerification = {
-  at: '2026-10-23T12:00:45Z',
-  checks: [
-    { label: 'Task API health', serviceId: 'task-api', result: 'pass' },
-    { label: 'Dependency health', serviceId: 'dependency', result: 'pass' },
+const passingVerification: VerificationRecord = {
+  passed: true,
+  serviceChecks: [
+    { serviceId: 'task-api', result: 'pass', at: '2026-10-23T12:00:45Z' },
+    { serviceId: 'dependency', result: 'pass', at: '2026-10-23T12:00:45Z' },
   ],
-  journey: { label: 'Task summary request', result: 'pass' },
+  journeyCheck: { result: 'pass', at: '2026-10-23T12:00:45Z' },
 };
 
-const failedVerification: IncidentVerification = {
-  at: '2026-10-23T12:34:12Z',
-  checks: [
-    { label: 'Task API health', serviceId: 'task-api', result: 'fail' },
-    { label: 'Dependency health', serviceId: 'dependency', result: 'pass' },
+const failedVerification: VerificationRecord = {
+  passed: false,
+  serviceChecks: [
+    { serviceId: 'task-api', result: 'fail', at: '2026-10-23T12:34:12Z' },
+    { serviceId: 'dependency', result: 'pass', at: '2026-10-23T12:34:12Z' },
   ],
-  journey: { label: 'Task summary request', result: 'fail' },
+  journeyCheck: { result: 'fail', at: '2026-10-23T12:34:12Z', detail: 'HTTP 500; recovery not verified.' },
 };
 
 describe('verified recovery metrics', () => {
@@ -32,10 +32,10 @@ describe('verified recovery metrics', () => {
     expect(isVerifiedRecovery({ ...base, verification: passingVerification })).toBe(true);
   });
 
-  test('recovery times are computed from detection and fault timestamps', () => {
+  test('recovery times are computed from detection and fault-injection timestamps', () => {
     const incident = parseIncident({
       ...base, verification: passingVerification,
-      timing: { faultAt: '2026-10-23T11:58:10Z', detectedAt: '2026-10-23T12:00:00Z', verifiedRecoveredAt: '2026-10-23T12:00:45Z' },
+      timing: { faultInjectedAt: '2026-10-23T11:58:10Z', verifiedRecoveryAt: '2026-10-23T12:00:45Z' },
     });
     const durations = recoveryDurations(incident);
     expect(durations.detectionToRecovery).toBe('45s');
@@ -54,9 +54,10 @@ describe('verified recovery metrics', () => {
   });
 
   test('a passing journey with one failed service check is not verified', () => {
-    const mixed: IncidentVerification = {
-      ...passingVerification,
-      checks: [...passingVerification.checks, { label: 'Frontend health', result: 'fail' }],
+    const mixed: VerificationRecord = {
+      passed: true,
+      serviceChecks: [...passingVerification.serviceChecks, { serviceId: 'frontend', result: 'fail', at: '2026-10-23T12:00:45Z' }],
+      journeyCheck: passingVerification.journeyCheck,
     };
     expect(isVerifiedRecovery({ ...base, verification: mixed })).toBe(false);
   });
@@ -64,7 +65,7 @@ describe('verified recovery metrics', () => {
   test('missing timestamps never produce invented durations', () => {
     const incident = parseIncident({
       ...base, verification: passingVerification,
-      timing: { detectedAt: '2026-10-23T12:00:00Z' },
+      timing: {},
     });
     expect(recoveryDurations(incident)).toEqual({ detectionToRecovery: null, faultToRecovery: null });
   });
@@ -72,7 +73,7 @@ describe('verified recovery metrics', () => {
   test('fault-to-recovery stays null when the fault time is unknown', () => {
     const incident = parseIncident({
       ...base, verification: passingVerification,
-      timing: { detectedAt: '2026-10-23T12:00:00Z', verifiedRecoveredAt: '2026-10-23T12:00:45Z' },
+      timing: { verifiedRecoveryAt: '2026-10-23T12:00:45Z' },
     });
     expect(recoveryDurations(incident).detectionToRecovery).toBe('45s');
     expect(recoveryDurations(incident).faultToRecovery).toBeNull();
@@ -80,92 +81,82 @@ describe('verified recovery metrics', () => {
 
   test('an unrecovered status is never verified even with passing checks', () => {
     expect(isVerifiedRecovery({ ...base, status: 'needs_human', verification: passingVerification })).toBe(false);
-    expect(isVerifiedRecovery({ ...base, status: 'remediating', verification: passingVerification })).toBe(false);
+    expect(isVerifiedRecovery({ ...base, status: 'verifying', verification: passingVerification })).toBe(false);
   });
 });
 
-describe('incident response parsing for FE1 fields', () => {
-  test('structured evidence distinguishes observations from inferences', () => {
+describe('incident response parsing for canonical contract fields', () => {
+  test('structured evidence keeps the inference index instead of a kind flag', () => {
     const parsed = parseIncident({
       ...base,
       evidenceItems: [
-        { source: 'probe', observation: 'HTTP 500.', kind: 'observation', at: '2026-10-23T12:00:01Z', serviceId: 'task-api' },
-        { source: 'diagnosis', observation: 'Deployment change is the cause.', kind: 'inference' },
+        { source: 'probe', observation: 'HTTP 500.', at: '2026-10-23T12:00:01Z', serviceId: 'task-api' },
+        { source: 'diagnosis', observation: 'Deployment change is the cause.', at: '2026-10-23T12:00:05Z', inferenceOf: 0 },
       ],
     });
-    expect(parsed.evidenceItems?.map(item => item.kind)).toEqual(['observation', 'inference']);
+    expect(parsed.evidenceItems?.[1].inferenceOf).toBe(0);
     expect(parsed.evidenceItems?.[0].serviceId).toBe('task-api');
   });
 
   test('a denied dry-run action keeps its policy reason without an execution result', () => {
     const parsed = parseIncident({
       ...base, status: 'needs_human',
-      actions: [{ kind: 'restart_service', target: 'frontend', dryRun: true, policyResult: 'denied', policyReason: 'Target not allowlisted.' }],
+      actions: [{ kind: 'restart_service', target: 'frontend', dryRun: true, policyResult: 'denied', policyReason: 'Target not allowlisted.', attempt: 1, at: '2026-10-23T12:40:13Z' }],
     });
-    const action = parsed.actions?.[0] as IncidentAction;
-    expect(action.policyResult).toBe('denied');
-    expect(action.dryRun).toBe(true);
-    expect(action.policyReason).toBe('Target not allowlisted.');
-    expect(action.result).toBeUndefined();
+    const action = parsed.actions?.[0];
+    expect(action?.policyResult).toBe('denied');
+    expect(action?.dryRun).toBe(true);
+    expect(action?.policyReason).toBe('Target not allowlisted.');
+    expect(action?.executionResult).toBeUndefined();
   });
 
   test('an executed action records its attempt and result', () => {
     const parsed = parseIncident({
       ...base,
-      actions: [{ kind: 'restore_revision', target: 'task-api', dryRun: false, policyResult: 'approved', attempt: 1, result: 'succeeded' }],
+      actions: [{ kind: 'restore_revision', target: 'task-api', dryRun: false, policyResult: 'allowed', policyReason: 'Known-good revision confirmed.', attempt: 1, executionResult: 'succeeded', at: '2026-10-23T12:00:20Z' }],
     });
     expect(parsed.actions?.[0].attempt).toBe(1);
-    expect(parsed.actions?.[0].result).toBe('succeeded');
+    expect(parsed.actions?.[0].executionResult).toBe('succeeded');
   });
 
-  test('an unknown cause confidence is preserved, not coerced', () => {
+  test('multi-target, classification, and evidence sources are parsed', () => {
+    const parsed = parseIncident({
+      ...base, targetId: 'local-compose', classification: 'incident', evidenceSources: ['probe', 'sentry'], affectedServices: ['task-api'],
+    });
+    expect(parsed.targetId).toBe('local-compose');
+    expect(parsed.classification).toBe('incident');
+    expect(parsed.evidenceSources).toEqual(['probe', 'sentry']);
+    expect(parsed.affectedServices).toEqual(['task-api']);
+  });
+
+  test('escalation keeps its reason, next step, and notification outcome enum', () => {
     const parsed = parseIncident({
       ...base, status: 'needs_human',
-      cause: { summary: 'Conflicting signals.', confidence: 'unknown' },
-    });
-    expect(parsed.cause?.confidence).toBe('unknown');
-  });
-
-  test('services carry their health state and check time', () => {
-    const parsed = parseIncident({
-      ...base,
-      services: [
-        { id: 'task-api', health: 'unhealthy', checkedAt: '2026-10-23T12:40:02Z' },
-        { id: 'dependency', health: 'unknown' },
-      ],
-    });
-    expect(parsed.services?.map(service => service.health)).toEqual(['unhealthy', 'unknown']);
-  });
-
-  test('escalation keeps its reason, next step, and notification outcome', () => {
-    const parsed = parseIncident({
-      ...base, status: 'needs_human',
-      escalation: { reason: 'Verification failed.', at: '2026-10-23T12:34:30Z', recommendedNextStep: 'Inspect the config.', notificationOutcome: 'Slack delivered' },
+      escalation: { reason: 'Verification failed.', at: '2026-10-23T12:34:30Z', recommendedNextStep: 'Inspect the config.', notificationOutcome: 'failed' },
     });
     expect(parsed.escalation?.reason).toBe('Verification failed.');
     expect(parsed.escalation?.recommendedNextStep).toBe('Inspect the config.');
+    expect(parsed.escalation?.notificationOutcome).toBe('failed');
   });
 
-  test('invalid policy results, health states, and evidence kinds are rejected', () => {
-    expect(() => parseIncident({ ...base, actions: [{ kind: 'restart', target: 'x', dryRun: true, policyResult: 'maybe' }] })).toThrow('Invalid incident policy result.');
-    expect(() => parseIncident({ ...base, services: [{ id: 'x', health: 'broken' }] })).toThrow('Invalid incident service health.');
-    expect(() => parseIncident({ ...base, evidenceItems: [{ source: 'probe', observation: 'x', kind: 'guess' }] })).toThrow('Invalid incident evidence kind.');
-    expect(() => parseIncident({ ...base, actions: [{ kind: 'restart', target: 'x', dryRun: 'yes', policyResult: 'approved' }] })).toThrow('Invalid incident action dry-run flag.');
+  test('invalid classifications, policy results, and action kinds are rejected', () => {
+    expect(() => parseIncident({ ...base, classification: 'critical' })).toThrow('Invalid incident classification.');
+    expect(() => parseIncident({ ...base, actions: [{ kind: 'restart_service', target: 'x', dryRun: true, policyResult: 'maybe', policyReason: 'r', attempt: 1, at: '2026-10-23T12:00:00Z' }] })).toThrow('Invalid incident policy result.');
+    expect(() => parseIncident({ ...base, actions: [{ kind: 'rm_rf', target: 'x', dryRun: true, policyResult: 'allowed', policyReason: 'r', attempt: 1, at: '2026-10-23T12:00:00Z' }] })).toThrow('Invalid incident action kind.');
+    expect(() => parseIncident({ ...base, timing: { actionAt: 'not-a-date' } })).toThrow('Invalid incident timestamp.');
   });
 
-  test('timestamps in timing are validated and optional ones may be absent', () => {
-    const parsed = parseIncident({ ...base, timing: { detectedAt: '2026-10-23T12:00:00Z', decidedAt: '2026-10-23T12:00:12Z' } });
-    expect(parsed.timing?.decidedAt).toBe('2026-10-23T12:00:12Z');
-    expect(parsed.timing?.faultAt).toBeUndefined();
-    expect(() => parseIncident({ ...base, timing: { detectedAt: '2026-10-23T12:00:00Z', actionAt: 'not-a-date' } })).toThrow('Invalid incident timestamp.');
+  test('new kinds and statuses from main are accepted; old stored incidents stay valid', () => {
+    expect(parseIncident({ ...base, kind: 'config_drift', status: 'verifying' }).kind).toBe('config_drift');
+    expect(parseIncident(base).evidenceItems).toBeUndefined();
   });
 
   test('redaction applies to new text fields', () => {
     const parsed = parseIncident({
       ...base,
-      cause: { summary: 'Token leaked: api_key=abc123 in logs.', confidence: 'low' },
+      evidenceItems: [{ source: 'logs', observation: 'Token leaked: api_key=abc123 in logs.', at: '2026-10-23T12:00:01Z' }],
     });
-    expect(parsed.cause?.summary).toContain('[REDACTED]');
-    expect(parsed.cause?.summary).not.toContain('abc123');
+    expect(parsed.evidenceItems?.[0].observation).toContain('[REDACTED]');
+    expect(parsed.evidenceItems?.[0].observation).not.toContain('abc123');
   });
 });

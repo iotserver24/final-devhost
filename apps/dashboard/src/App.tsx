@@ -15,7 +15,6 @@ import { useActivity } from './useActivity';
 import {
   ActionAudit,
   AffectedServices,
-  Diagnosis,
   EscalationBanner,
   EvidenceItems,
   incidentHeadline,
@@ -95,7 +94,13 @@ function IncidentCard({ incident, selected, onSelect }: { incident: Incident; se
     <button className={`incident-card${selected ? ' selected' : ''}`} onClick={onSelect} type="button">
       <span className="card-topline"><span>{formatDate(incident.detectedAt)}</span><StatusPill status={incident.status} /></span>
       <strong>{kindLabels[incident.kind]}</strong>
-      <span className="card-meta">{decisionSummary(incident)} · {shortSha(incident.commitSha)} · {incident.probePath ?? 'build'}</span>
+      <span className="card-meta">
+        {incident.targetId ? `${incident.targetId} · ` : ''}{decisionSummary(incident)} · {shortSha(incident.commitSha)} · {incident.probePath ?? 'build'}
+      </span>
+      {(incident.classification || incident.evidenceSources?.length) && <span className="card-tags">
+        {incident.classification && <span className={`tag tag-${incident.classification}`}>{incident.classification}</span>}
+        {incident.evidenceSources?.map(source => <span className="tag" key={source}>{source}</span>)}
+      </span>}
       <span className="card-summary">{incidentHeadline(incident)}</span>
     </button>
   );
@@ -265,12 +270,11 @@ function Detail({ incident, watch }: { incident: Incident; watch: WatchState | n
     <EscalationBanner incident={incident} />
     <WatchTelemetry watch={watch} />
     <RecoveryMetrics incident={incident} />
-    <Diagnosis incident={incident} />
-    {incident.services && <AffectedServices services={incident.services} />}
-    <ActionAudit actions={incident.actions ?? []} />
+    <AffectedServices incident={incident} />
+    <ActionAudit actions={incident.actions} />
     <Verification verification={incident.verification} />
     <LiveActivity incidentId={incident.id} />
-    <div className="detail-columns"><EvidenceItems items={incident.evidenceItems ?? []} fallback={incident.evidence} /><Timeline events={incident.events} /></div>
+    <div className="detail-columns"><EvidenceItems items={incident.evidenceItems} fallback={incident.evidence} /><Timeline events={incident.events} /></div>
   </main>;
 }
 
@@ -372,19 +376,28 @@ function Dashboard() {
   const [showSetup, setShowSetup] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [refresh, setRefresh] = useState(0);
+  const [targetFilter, setTargetFilter] = useState('all');
   const snapshot = useIncidents(mode, selectedId, refresh);
   const selected = snapshot.detail ?? snapshot.incidents[0] ?? null;
-  const counts = useMemo(() => ({ active: snapshot.incidents.filter(item => !['recovered', 'needs_human', 'remediation_failed', 'pr_opened'].includes(item.status)).length, recovered: snapshot.incidents.filter(item => item.status === 'recovered').length }), [snapshot.incidents]);
+  const targets = useMemo(() => [...new Set(snapshot.incidents.map(item => item.targetId).filter((value): value is string => Boolean(value)))], [snapshot.incidents]);
+  const visible = useMemo(() => targetFilter === 'all' ? snapshot.incidents : snapshot.incidents.filter(item => item.targetId === targetFilter), [snapshot.incidents, targetFilter]);
+  const counts = useMemo(() => ({ active: visible.filter(item => !['recovered', 'needs_human', 'remediation_failed', 'pr_opened'].includes(item.status)).length, recovered: visible.filter(item => item.status === 'recovered').length }), [visible]);
 
   return <div className="app-shell">
     <header className="topbar"><div className="brand"><img className="brand-logo" src="/logo.png" alt="Sentinel logo" /><span>Sentinel <em>deploy watch</em></span></div><div className="topbar-meta"><LiveWatch onWatch={setWatch} /><span className={`mode-dot ${mode}`} />{mode === 'fixtures' ? 'Rehearsal data' : 'Live controller'}<button className="refresh" onClick={() => setShowSetup(value => !value)} type="button">Setup</button><button className="refresh" onClick={() => setRefresh(value => value + 1)} type="button">Refresh</button></div></header>
     <FailureStreak watch={watch} />
     <div className="workspace">
-      <aside className="sidebar"><div className="sidebar-heading"><div><p className="eyebrow">Operations</p><h2>Incidents</h2></div><span className="count">{snapshot.incidents.length}</span></div><div className="sidebar-stats"><span><strong>{counts.active}</strong> active</span><span><strong>{counts.recovered}</strong> recovered</span></div>
+      <aside className="sidebar"><div className="sidebar-heading"><div><p className="eyebrow">Operations</p><h2>Incidents</h2></div><span className="count">{visible.length}</span></div><div className="sidebar-stats"><span><strong>{counts.active}</strong> active</span><span><strong>{counts.recovered}</strong> recovered</span></div>
+        {targets.length > 1 && <label className="target-filter">Target
+          <select value={targetFilter} onChange={event => setTargetFilter(event.target.value)}>
+            <option value="all">All targets</option>
+            {targets.map(target => <option key={target} value={target}>{target}</option>)}
+          </select>
+        </label>}
         {snapshot.loading && <p className="state-message">Loading incident evidence…</p>}
         {snapshot.error && <div className="error-box" role="alert"><strong>Controller unavailable</strong><p>{snapshot.error}</p><button onClick={() => setRefresh(value => value + 1)} type="button">Try again</button></div>}
-        {!snapshot.loading && !snapshot.error && snapshot.incidents.length === 0 && <p className="state-message">No incidents recorded yet.</p>}
-        <nav className="incident-list" aria-label="Incidents">{snapshot.incidents.map(incident => <IncidentCard key={incident.id} incident={incident} selected={selected?.id === incident.id} onSelect={() => setSelectedId(incident.id)} />)}</nav>
+        {!snapshot.loading && !snapshot.error && visible.length === 0 && <p className="state-message">No incidents recorded yet.</p>}
+        <nav className="incident-list" aria-label="Incidents">{visible.map(incident => <IncidentCard key={incident.id} incident={incident} selected={selected?.id === incident.id} onSelect={() => setSelectedId(incident.id)} />)}</nav>
       </aside>
       {showSetup ? <Setup onClose={() => setShowSetup(false)} /> : selected ? <Detail incident={selected} watch={watch} /> : <Overview watch={watch} />}
     </div>

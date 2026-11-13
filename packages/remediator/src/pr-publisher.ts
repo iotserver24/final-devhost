@@ -1,13 +1,34 @@
 import { execFile } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import type { DraftPrResult, RemediationRequest, RemediationResult } from './types.js';
 import { allowedPathPrefix, truncate, validateChangedFiles, validateRequest } from './validation.js';
+import { checkPatch, defaultPolicy as defaultDependencyPolicy, describeViolations, parsePolicyConfig, type DependencyPolicy } from './dependency-policy.js';
 
 const exec = promisify(execFile);
 const MAX_PATCH_BYTES = 256 * 1024;
+
+/**
+ * Load the dependency policy from REMEDIATOR_DEPENDENCY_POLICY_FILE, or use the
+ * built-in defaults. A malformed policy file is fatal: widening the allowlist by
+ * accident is worse than refusing to publish.
+ */
+export function loadDependencyPolicy(): DependencyPolicy {
+  const file = process.env.REMEDIATOR_DEPENDENCY_POLICY_FILE?.trim();
+  if (!file) return defaultDependencyPolicy;
+  return parsePolicyConfig(readFileSync(file, 'utf8'));
+}
+
+/** Dependency and import policy check for one patch. Throws on any violation. */
+export function assertDependencyPolicy(patch: string, policy: DependencyPolicy = loadDependencyPolicy()): void {
+  const violations = checkPatch(patch, policy);
+  if (violations.length) {
+    throw new Error(`Dependency policy rejected the patch:\n${describeViolations(violations)}`);
+  }
+}
 
 /** Validate again on the trusted controller; the sandbox result is untrusted input. */
 export function validatePatch(patch: string): string[] {
@@ -27,6 +48,7 @@ export function validatePatch(patch: string): string[] {
       if (!path.startsWith(prefix) || path.includes('..')) throw new Error('Patch has a path outside the demo app');
     }
   }
+  assertDependencyPolicy(patch);
   return [...new Set(paths)];
 }
 
