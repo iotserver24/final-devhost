@@ -106,8 +106,9 @@ export class SentryClient {
   }
 
   /** Evidence lines suitable for an incident, bounded and redaction-safe. */
-  async evidenceLines(): Promise<string[]> {
-    const evidence = await this.recentIssues();
+  async evidenceLines(project?: string): Promise<string[]> {
+    const client = project && project !== this.options.project ? new SentryClient({ ...this.options, project }) : this;
+    const evidence = await client.recentIssues();
     if (!evidence.ok) return [];
     return evidence.issues.map(issue => `Sentry${issue.shortId ? ` ${issue.shortId}` : ''}: ${issue.title} (${issue.level}, ${issue.count} event${issue.count === 1 ? '' : 's'})`);
   }

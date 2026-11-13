@@ -6,7 +6,8 @@ import { createIncidentApi } from './api';
 import { ActivityHub } from './activity';
 import { createActivityApi } from './activity-api';
 import { dispatchRun } from './remediation';
-import { startPollingWorker, type PollingWorker } from './worker';
+import { startPollingWorker, type PollingWorker, type WatchTarget } from './worker';
+import { ensureLegacyWatchedService, parseWatchedService, type WatchedService } from './services';
 import { VercelProvider } from './vercel-provider';
 import { CoolifyProvider, RailwayProvider, RenderProvider } from './platform-providers';
 import { checkProject, runtimeLogSignal, type DeploymentProvider, type DeploymentSummary, type RuntimeLog } from './monitor';
@@ -244,14 +245,46 @@ const posthog = posthogFromEnvironment();
 if (posthog.configured()) console.info('PostHog evidence source is configured (advisory only).');
 const posthogEvidence = () => posthog.evidenceLines();
 
-function launchMonitor(config: MonitorConfig): void {
+function providerForService(config: MonitorConfig, service: WatchedService): DeploymentProvider {
+  if (config.platform !== 'vercel') return config.provider;
+  if (service.vercelProjectId === config.projectId && service.productionHost === (process.env.VERCEL_PRODUCTION_DOMAIN ?? '').toLowerCase()) {
+    return config.provider;
+  }
+  const token = process.env.VERCEL_ACCESS_TOKEN;
+  if (!token) return config.provider;
+  return new VercelProvider({
+    accessToken: token,
+    projectId: service.vercelProjectId,
+    productionDomain: service.productionHost,
+    teamId: service.teamId || process.env.VERCEL_TEAM_ID,
+    runtimeLogWindowMs: config.logsIntervalMs + 30_000,
+  });
+}
+
+async function launchMonitor(config: MonitorConfig): Promise<void> {
   if (monitorWorker) return;
-  watch.probePath = config.probePath;
+  await store.ready;
+  await ensureLegacyWatchedService(store);
+  const services = (await store.listWatchedServices()).filter(service => service.enabled);
+  const targets: WatchTarget[] = services.length
+    ? services.map(service => ({
+      projectId: service.vercelProjectId,
+      probePath: service.probePath,
+      serviceId: service.id,
+      repository: service.repository,
+      role: service.role,
+      provider: providerForService(config, service),
+      ...(service.sentryProject ? { sentryProject: service.sentryProject } : {}),
+      ...(service.posthogProject ? { posthogProject: service.posthogProject } : {}),
+    }))
+    : [{ projectId: config.projectId, probePath: config.probePath, provider: config.provider, role: 'app' }];
+  watch.probePath = targets[0]?.probePath ?? config.probePath;
   watch.rollbackEnabled = config.rollbackEnabled;
   watch.intervalMs = config.pollIntervalMs;
   monitorWorker = startPollingWorker({
-    projectIds: [config.projectId],
-    allowlistedProjectIds: config.rollbackEnabled ? new Set([config.projectId]) : new Set(),
+    projectIds: targets.map(target => target.projectId),
+    targets,
+    allowlistedProjectIds: config.rollbackEnabled ? new Set(targets.map(target => target.projectId)) : new Set(),
     probePath: config.probePath,
     provider: config.provider,
     store,
@@ -363,19 +396,23 @@ function launchMonitor(config: MonitorConfig): void {
         return typeof value === 'function' ? value.bind(target) : value;
       },
     });
-    const observeRuntime = async (deploymentId: string, logs: RuntimeLog[], fresh: RuntimeLog[]): Promise<void> => {
+    const observeRuntime = async (target: WatchTarget, deploymentId: string, logs: RuntimeLog[], fresh: RuntimeLog[]): Promise<void> => {
       const signal = runtimeLogSignal(logs, fresh, deploymentId);
       if (!signal) return;
+      const upstream = /upstream dependency/i.test(signal.evidence);
       const result = await checkProject({
-        projectId: config.projectId,
-        allowlistedProjectIds: config.rollbackEnabled ? new Set([config.projectId]) : new Set(),
-        probePath: config.probePath,
-        provider: logProvider,
+        projectId: target.projectId,
+        allowlistedProjectIds: config.rollbackEnabled ? new Set([target.projectId]) : new Set(),
+        probePath: target.probePath || config.probePath,
+        provider: target.provider ?? logProvider,
+        ...(target.serviceId ? { serviceId: target.serviceId } : {}),
+        ...(target.repository ? { repository: target.repository } : {}),
+        ...(target.role ? { serviceRole: target.role } : {}),
+        sentryEvidence: () => sentry.evidenceLines(upstream ? undefined : target.sentryProject),
+        posthogEvidence: () => posthog.evidenceLines(upstream ? undefined : target.posthogProject),
         store,
         actions,
         classificationPolicy,
-        sentryEvidence,
-    posthogEvidence,
         logSignal: signal,
       });
       if (result.action === 'monitor' && result.consecutiveFailures > watch.failures) {
@@ -400,14 +437,24 @@ function launchMonitor(config: MonitorConfig): void {
           if (!pulled.has(deployment.id) || incomplete.has(deployment.id)) await pullDeployment(deployment);
         }
         if (config.provider.getRuntimeLogs) {
-          const current = await config.provider.getProductionDeployment(config.projectId);
-          if (current) {
-            const logs = await config.provider.getRuntimeLogs(config.projectId, current.id);
-            const fresh = await store.saveRuntimeLogs(config.projectId, current.id, logs);
-            watch.deployment = { id: current.id, url: current.immutableUrl, createdAt: current.createdAt };
-            watch.logsSource = 'runtime-logs';
-            watch.logs = logs.slice(-200);
-            await observeRuntime(current.id, logs, fresh);
+          for (const target of targets) {
+            const provider = target.provider ?? config.provider;
+            if (!provider.getRuntimeLogs || !provider.getProductionDeployment) continue;
+            try {
+              const current = await provider.getProductionDeployment(target.projectId);
+              if (!current) continue;
+              const logs = await provider.getRuntimeLogs(target.projectId, current.id);
+              const fresh = await store.saveRuntimeLogs(target.projectId, current.id, logs);
+              if (target.projectId === targets[0]?.projectId) {
+                watch.deployment = { id: current.id, url: current.immutableUrl, createdAt: current.createdAt };
+                watch.logsSource = 'runtime-logs';
+                watch.logs = logs.slice(-200);
+              }
+              await observeRuntime(target, current.id, logs, fresh);
+            } catch (error) {
+              if (target.projectId === targets[0]?.projectId) throw error;
+              console.error(`Log pull failed for ${target.projectId}.`);
+            }
           }
         }
         watch.logsCheckedAt = new Date().toISOString();
@@ -709,6 +756,22 @@ const server = Bun.serve({
     if (connect) return connect;
     const settingsResponse = await settingsApi(request);
     if (settingsResponse) return settingsResponse;
+    if (url.pathname === '/api/watched-services') {
+      if (request.method === 'GET') return Response.json({ services: await store.listWatchedServices() });
+      if (request.method === 'DELETE') {
+        const id = url.searchParams.get('id') ?? '';
+        if (!/^svc-[a-z0-9-]{4,40}$/.test(id)) return Response.json({ error: 'Service id is required.' }, { status: 400 });
+        await store.deleteWatchedService(id);
+        return Response.json({ ok: true });
+      }
+      if (request.method !== 'POST') return Response.json({ error: 'Method not allowed.' }, { status: 405 });
+      let body: unknown;
+      try { body = await request.json(); } catch { return Response.json({ error: 'Expected JSON.' }, { status: 400 }); }
+      const parsed = parseWatchedService(body);
+      if ('error' in parsed) return Response.json({ error: parsed.error }, { status: 400 });
+      await store.saveWatchedService(parsed);
+      return Response.json({ ok: true, service: parsed });
+    }
     if (url.pathname === '/api/watch') {
       if (request.method !== 'GET') return Response.json({ error: 'Method not allowed.' }, { status: 405 });
       return Response.json({ ...watch, now: new Date().toISOString() });

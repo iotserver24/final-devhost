@@ -1,6 +1,7 @@
 import postgres, { type Sql } from 'postgres';
 import type { Incident } from '@nexathon/contracts';
 import type { RuntimeLog } from './monitor';
+import type { WatchedService } from './services';
 
 interface StoredIncident { incident_json: Incident; }
 export interface StoredAgentRun {
@@ -29,6 +30,7 @@ interface MemoryState {
   settings: Map<string, string>;
   agentRuns: Map<string, StoredAgentRun & { events: StoredAgentEvent[] }>;
   runtimeLogs: Map<string, RuntimeLog & { projectId: string; deploymentId: string }>;
+  watchedServices: Map<string, WatchedService>;
 }
 type StoreValue<T> = T | Promise<T>;
 
@@ -57,7 +59,7 @@ function agentEventFromRow(row: Record<string, unknown>): StoredAgentEvent {
 }
 
 function memoryState(): MemoryState {
-  return { incidents: new Map(), probeStreaks: new Map(), rollbackAttempts: new Set(), settings: new Map(), agentRuns: new Map(), runtimeLogs: new Map() };
+  return { incidents: new Map(), probeStreaks: new Map(), rollbackAttempts: new Set(), settings: new Map(), agentRuns: new Map(), runtimeLogs: new Map(), watchedServices: new Map() };
 }
 
 export class IncidentStore {
@@ -135,6 +137,13 @@ export class IncidentStore {
         message TEXT NOT NULL,
         status_code INTEGER,
         logged_at BIGINT NOT NULL
+      )
+    `;
+    await this.sql!`
+      CREATE TABLE IF NOT EXISTS watched_services (
+        id TEXT PRIMARY KEY,
+        created_at TEXT NOT NULL,
+        service_json JSONB NOT NULL
       )
     `;
     await this.sql!`
@@ -342,6 +351,32 @@ export class IncidentStore {
       INSERT INTO integration_settings (key, value) VALUES (${key}, ${value})
       ON CONFLICT(key) DO UPDATE SET value = EXCLUDED.value
     `)).then(() => undefined);
+  }
+
+  listWatchedServices(): StoreValue<WatchedService[]> {
+    if (this.memory) return [...this.memory.watchedServices.values()].map(service => structuredClone(service));
+    return this.sql!`SELECT service_json FROM watched_services ORDER BY created_at ASC`
+      .then(rows => rows.map(row => structuredClone(row.service_json) as WatchedService));
+  }
+
+  saveWatchedService(service: WatchedService): StoreValue<void> {
+    if (this.memory) {
+      this.memory.watchedServices.set(service.id, structuredClone(service));
+      return;
+    }
+    return this.sql!`
+      INSERT INTO watched_services (id, created_at, service_json)
+      VALUES (${service.id}, ${service.createdAt}, ${this.sql!.json(service as unknown as Record<string, never>)})
+      ON CONFLICT(id) DO UPDATE SET service_json = EXCLUDED.service_json
+    `.then(() => undefined);
+  }
+
+  deleteWatchedService(id: string): StoreValue<void> {
+    if (this.memory) {
+      this.memory.watchedServices.delete(id);
+      return;
+    }
+    return this.sql!`DELETE FROM watched_services WHERE id = ${id}`.then(() => undefined);
   }
 
   deleteSettings(keys: string[]): StoreValue<void> {

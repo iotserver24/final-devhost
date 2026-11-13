@@ -32,6 +32,15 @@ export function Setup({ onClose }: { onClose: () => void }) {
   const [monitorNote, setMonitorNote] = useState('');
   const [githubListNote, setGithubListNote] = useState('Repository list has not loaded.');
   const [vercelListNote, setVercelListNote] = useState('Project list has not loaded.');
+  const [services, setServices] = useState<{ id: string; name: string; repository: string; role: string; probePath: string; enabled: boolean }[]>([]);
+  const [serviceDraft, setServiceDraft] = useState({ name: '', repository: '', vercelProjectId: '', productionHost: '', probePath: '/api/tasks', role: 'app' });
+
+  const loadServices = useCallback(async () => {
+    const response = await fetch('/api/watched-services', { credentials: 'same-origin' });
+    if (!response.ok) return;
+    const body = await response.json() as { services?: { id: string; name: string; repository: string; role: string; probePath: string; enabled: boolean }[] };
+    setServices(body.services ?? []);
+  }, []);
 
   const loadSettings = useCallback(async (signal?: AbortSignal) => {
     const response = await fetch('/api/settings', { credentials: 'same-origin', headers: { Accept: 'application/json' }, signal });
@@ -51,8 +60,9 @@ export function Setup({ onClose }: { onClose: () => void }) {
     void loadSettings(abort.signal).catch(reason => {
       if (!abort.signal.aborted) setError(reason instanceof Error ? reason.message : 'Settings could not be loaded.');
     });
+    void loadServices();
     return () => abort.abort();
-  }, [loadSettings]);
+  }, [loadSettings, loadServices]);
 
   const field = useMemo(() => new Map(fields.map(item => [item.key, item])), [fields]);
   const githubReady = Boolean(field.get('GITHUB_INSTALLATION_ID')?.configured);
@@ -206,6 +216,20 @@ export function Setup({ onClose }: { onClose: () => void }) {
       </div>
       <button className="button button-ghost" type="button" onClick={onClose}>Back to incidents</button>
     </div>
+
+    <section className="setup-hero" aria-labelledby="services-title">
+      <div className="setup-hero-copy"><div><h2 id="services-title">Watched services</h2><p>Each row is one repository and one Vercel project. The app and a dependency are watched separately.</p></div></div>
+      <ul>{services.map(service => <li key={service.id}>{service.name} · {service.repository} · {service.role} · {service.probePath} <button type="button" onClick={() => void fetch(`/api/watched-services?id=${service.id}`, { method: 'DELETE', credentials: 'same-origin' }).then(() => loadServices())}>Remove</button></li>)}</ul>
+      {services.length === 0 && <p>No extra services yet. The current saved target is added on controller start.</p>}
+      <button type="button" onClick={() => void loadServices()}>Refresh services</button>
+      <label className="setup-field">Name<input value={serviceDraft.name} onChange={event => setServiceDraft({ ...serviceDraft, name: event.target.value })} /></label>
+      <label className="setup-field">Repository<input value={serviceDraft.repository} placeholder="owner/name" onChange={event => setServiceDraft({ ...serviceDraft, repository: event.target.value })} /></label>
+      <label className="setup-field">Vercel project id<input value={serviceDraft.vercelProjectId} onChange={event => setServiceDraft({ ...serviceDraft, vercelProjectId: event.target.value })} /></label>
+      <label className="setup-field">Host<input value={serviceDraft.productionHost} onChange={event => setServiceDraft({ ...serviceDraft, productionHost: event.target.value })} /></label>
+      <label className="setup-field">Probe<input value={serviceDraft.probePath} onChange={event => setServiceDraft({ ...serviceDraft, probePath: event.target.value })} /></label>
+      <label className="setup-field">Role<select value={serviceDraft.role} onChange={event => setServiceDraft({ ...serviceDraft, role: event.target.value })}><option value="app">app</option><option value="dependency">dependency</option></select></label>
+      <button type="button" onClick={() => void fetch('/api/watched-services', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(serviceDraft) }).then(() => loadServices())}>Add service</button>
+    </section>
 
     <p className="setup-note">Railway, Render, and Coolify use scoped API tokens below. Select the active platform, provide its public production URL and service/application ID, then restart Sentinel. Deployment logs are attached to incident evidence and rollback remains opt-in.</p>
 

@@ -261,6 +261,7 @@ function Detail({ incident, watch }: { incident: Incident; watch: WatchState | n
       </ul>
     </section>
     <section className="signal-grid" aria-label="Incident summary">
+      <div><span>Cause</span><strong>{incident.cause ? incident.cause.replaceAll('_', ' ') : 'Not labeled yet'}</strong></div>
       <div><span>Decision</span><strong>{decisionSummary(incident)}</strong></div>
       <div><span>Revision</span><strong className="mono">{incident.commitSha ?? '—'}</strong></div>
       <div><span>Probe route</span><strong className="mono">{incident.probePath ?? 'Build status'}</strong></div>
