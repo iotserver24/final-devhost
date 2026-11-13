@@ -12,7 +12,7 @@ if (!process.env.E2B_API_KEY || !template || !sha || !/^[0-9a-f]{40}$/i.test(sha
 const repo = '/home/user/nexathon';
 const sandbox = await Sandbox.create(template, { timeoutMs: 300_000, metadata: { purpose: 'nexathon-fixture-smoke' } });
 try {
-  await sandbox.commands.run(`git clone --no-checkout --filter=blob:none https://github.com/iotserver24/nexathon.git ${repo} && git -C ${repo} checkout --detach ${sha}`, { timeoutMs: 90_000 });
+  await sandbox.commands.run(`git clone --no-checkout --filter=blob:none https://github.com/iotserver24/final-devhost.git ${repo} && git -C ${repo} checkout --detach ${sha}`, { timeoutMs: 90_000 });
   await sandbox.commands.run('if [ -x "$HOME/.bun/bin/bun" ]; then "$HOME/.bun/bin/bun" --version; else curl -fsSL https://bun.com/install -o /tmp/bun-install.sh && bash /tmp/bun-install.sh bun-v1.3.11; fi', { timeoutMs: 90_000 });
   await sandbox.commands.run('export PATH="$HOME/.bun/bin:$PATH"; bun install --frozen-lockfile --filter ./apps/sample', { cwd: repo, timeoutMs: 120_000 });
 

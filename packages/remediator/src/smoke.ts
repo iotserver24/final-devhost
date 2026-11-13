@@ -28,7 +28,7 @@ if (!process.env.E2B_API_KEY) {
     if (process.env.SMOKE_CLONE_SHA) {
       if (!/^[0-9a-f]{40}$/i.test(process.env.SMOKE_CLONE_SHA)) throw new Error('SMOKE_CLONE_SHA must be a full commit SHA');
       const clone = await sandbox.commands.run(
-        `git clone --no-checkout --filter=blob:none https://github.com/iotserver24/nexathon.git /home/user/nexathon && git -C /home/user/nexathon checkout --detach ${process.env.SMOKE_CLONE_SHA}`,
+        `git clone --no-checkout --filter=blob:none https://github.com/iotserver24/final-devhost.git /home/user/nexathon && git -C /home/user/nexathon checkout --detach ${process.env.SMOKE_CLONE_SHA}`,
         { timeoutMs: 90_000 },
       );
       console.log(`cloned repo: ${clone.exitCode === 0 ? 'ok' : 'failed'}`);

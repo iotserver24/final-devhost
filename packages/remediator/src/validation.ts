@@ -1,6 +1,6 @@
 import type { ProviderConfig, RemediationRequest } from './types.js';
 
-const DEFAULT_REPOSITORY = 'iotserver24/nexathon';
+const DEFAULT_REPOSITORY = 'iotserver24/final-devhost';
 const DEFAULT_PATH_PREFIX = 'apps/sample/';
 const REPOSITORY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9-]*\/[A-Za-z0-9._-]+$/;
 const PREFIX_PATTERN = /^(?:[A-Za-z0-9._-]+\/)+$/;

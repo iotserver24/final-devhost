@@ -6,7 +6,7 @@ import type { ProviderConfig, RemediationRequest } from '../src/types.ts';
 
 const request: RemediationRequest = {
   incidentId: 'demo-42',
-  repository: 'iotserver24/nexathon',
+  repository: 'iotserver24/final-devhost',
   commitSha: 'a'.repeat(40),
   evidence: ['GET /api/demo -> 500'],
   setupCommand: 'bun install --frozen-lockfile',

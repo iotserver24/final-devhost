@@ -17,7 +17,7 @@ if (!['responses', 'chat_completions', 'messages'].includes(backend)) throw new 
 const fixturePath = 'apps/sample/tests/filter.repro.test.ts';
 const request: RemediationRequest = {
   incidentId: `demo-filter-${Date.now()}`,
-  repository: 'iotserver24/nexathon',
+  repository: 'iotserver24/final-devhost',
   commitSha: sha,
   evidence: ['Fixture demonstration: GET /api/tasks?status=Done returns the unfiltered list instead of Done tasks only.'],
   setupCommand: 'bun install --frozen-lockfile --filter ./apps/sample',
