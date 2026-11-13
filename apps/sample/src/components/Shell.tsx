@@ -26,7 +26,12 @@ export function Shell({ children }: { children: React.ReactNode }) {
       {children}
       <footer className="page-footer">
         <span>Fieldnote workspace</span>
-        <span><a href="/api/tasks">Task API</a> · <a href="/api/health">Health</a></span>
+        <span>
+          {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- API routes are not pages */}
+          <a href="/api/tasks">Task API</a>
+          {" · "}
+          <a href="/api/health">Health</a>
+        </span>
       </footer>
     </div>
   );

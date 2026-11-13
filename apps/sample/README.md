@@ -72,6 +72,26 @@ Unset the variable or set it to `healthy` to restore normal behavior. These
 switches are for the isolated demo target only. Never enable them on an
 unrelated or real production project.
 
+## Demo control API (local demos only)
+
+`GET/POST /api/demo/faults` and `POST /api/demo/dry-run` are **disabled by
+default**. Enabling them requires `DEMO_CONTROLS_ENABLED=true` plus a
+non-empty `DEMO_CONTROL_TOKEN`; every mutating request must send
+`Authorization: Bearer <token>`. The `Host` header is checked only as a
+loopback defense-in-depth measure and is never treated as authentication,
+because a remote client can spoof it.
+
+Deployment assumptions for a local demo: bind the published port to
+loopback (`next dev -H 127.0.0.1 -p 3000`) and never expose the demo
+control token outside the local machine. In any shared or production
+deployment, leave `DEMO_CONTROLS_ENABLED=false`.
+
+## Task mutations
+
+- `POST /api/tasks` — body `{ "title": string, "description"?, "status"?, "owner"?, "due"? }` → `201 { ok, task }`, `400` on validation errors, `500`/`503` under a demo fault.
+- `PATCH /api/tasks/:id` — partial task body → `200 { ok, task }`, `404` unknown id, `400` invalid body/JSON, `500`/`503` under a demo fault.
+- `DELETE /api/tasks/:id` — → `200 { ok: true }`, `404` unknown id, `500`/`503` under a demo fault.
+
 For the most realistic rollback demonstration:
 
 1. Deploy healthy code and save its immutable deployment URL.
