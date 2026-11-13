@@ -1,11 +1,21 @@
+"use client";
+
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 
 const links = [
   { href: "/", label: "Board" },
-  { href: "/projects", label: "Projects" }
+  { href: "/projects", label: "Projects" },
+  { href: "/sites/ledger", label: "Ledger" },
+  { href: "/sites/switchboard", label: "Switchboard" },
+  { href: "/sites/hopper", label: "Hopper" },
+  { href: "/sites/relay", label: "Relay" },
 ];
 
 export function Shell({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
+  const pinned = process.env.NEXT_PUBLIC_SITE_SLUG;
+  if (pinned || pathname.startsWith("/sites/")) return <>{children}</>;
   return (
     <div className="shell">
       <header className="topbar">

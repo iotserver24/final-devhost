@@ -97,8 +97,9 @@ export class PostHogClient {
     return [{ id, title: rawTitle.replace(/\s+/g, ' ').slice(0, TITLE_LIMIT), status, count }];
   }
 
-  async evidenceLines(): Promise<string[]> {
-    const evidence = await this.recentIssues();
+  async evidenceLines(projectId?: string): Promise<string[]> {
+    const client = projectId && projectId !== this.options.projectId ? new PostHogClient({ ...this.options, projectId }) : this;
+    const evidence = await client.recentIssues();
     if (!evidence.ok) return [];
     return evidence.issues.map(issue => `PostHog ${issue.id}: ${issue.title} (${issue.status}, ${issue.count} event${issue.count === 1 ? '' : 's'})`);
   }

@@ -1,8 +1,21 @@
 import type { MonitorOptions, MonitorResult } from './monitor';
 import { checkProject } from './monitor';
 
+export interface WatchTarget {
+  projectId: string;
+  probePath?: string;
+  serviceId?: string;
+  repository?: string;
+  role?: 'app' | 'dependency';
+  provider?: MonitorOptions['provider'];
+  sentryProject?: string;
+  posthogProject?: string;
+}
+
 export interface PollingWorkerOptions extends Omit<MonitorOptions, 'projectId'> {
   projectIds: string[];
+  /** Per-service probe path and provider. Falls back to the shared options when omitted. */
+  targets?: WatchTarget[];
   intervalMs?: number;
   deploymentStatusIntervalMs?: number;
   startImmediately?: boolean;
@@ -16,8 +29,10 @@ export interface PollingWorker {
 }
 
 export function startPollingWorker(options: PollingWorkerOptions): PollingWorker {
-  const projectIds = [...new Set(options.projectIds.map(id => id.trim()).filter(Boolean))];
-  if (projectIds.length === 0) throw new Error('At least one monitored Vercel project ID is required.');
+  const targets: WatchTarget[] = options.targets?.length
+    ? options.targets.filter(target => target.projectId.trim())
+    : [...new Set(options.projectIds.map(id => id.trim()).filter(Boolean))].map(projectId => ({ projectId }));
+  if (targets.length === 0) throw new Error('At least one monitored Vercel project ID is required.');
 
   const intervalMs = Math.max(1_000, Math.min(Math.trunc(options.intervalMs ?? 30_000), 300_000));
   const deploymentStatusIntervalMs = Math.max(1_000, Math.min(Math.trunc(options.deploymentStatusIntervalMs ?? 60_000), 600_000));
@@ -31,7 +46,8 @@ export function startPollingWorker(options: PollingWorkerOptions): PollingWorker
     if (activeCycle) return activeCycle;
 
     activeCycle = (async () => {
-      for (const projectId of projectIds) {
+      for (const target of targets) {
+        const projectId = target.projectId;
         if (stopped) break;
         let result: MonitorResult;
         try {
@@ -50,7 +66,17 @@ export function startPollingWorker(options: PollingWorkerOptions): PollingWorker
                 return typeof value === 'function' ? value.bind(target) : value;
               },
             });
-          result = await checkProject({ ...options, provider, projectId });
+          result = await checkProject({
+            ...options,
+            provider: target.provider ?? provider,
+            projectId,
+            probePath: target.probePath || options.probePath,
+            ...(target.serviceId ? { serviceId: target.serviceId } : {}),
+            ...(target.repository ? { repository: target.repository } : {}),
+            ...(target.role ? { serviceRole: target.role } : {}),
+            ...(target.sentryProject ? { sentryProject: target.sentryProject } : {}),
+            ...(target.posthogProject ? { posthogProject: target.posthogProject } : {}),
+          });
         } catch {
           try { await options.onError?.(projectId); } catch { /* keep other projects polling */ }
           continue;

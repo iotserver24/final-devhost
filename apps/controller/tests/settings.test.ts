@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { IncidentStore } from '../src/incident-store';
-import { createSettingsApi } from '../src/settings';
+import { applyStoredSettings, createSettingsApi } from '../src/settings';
 
 describe('integration settings', () => {
   it('stores website values and applies them over the environment on startup', async () => {
@@ -33,6 +33,24 @@ describe('integration settings', () => {
     await store.deleteSettings(['VERCEL_ACCESS_TOKEN']);
     expect((await store.readSettings()).VERCEL_ACCESS_TOKEN).toBeUndefined();
     expect((await store.readSettings()).SMTP_TO).toBe('judge@example.com');
+    store.close();
+  });
+
+  it('keeps a host environment value ahead of a saved dashboard value', async () => {
+    const store = new IncidentStore(':memory:');
+    await store.writeSettings({ CONTROLLER_REMEDIATION_ENABLED: 'false', SMTP_TO: 'judge@example.com' });
+    const previousRemediation = process.env.CONTROLLER_REMEDIATION_ENABLED;
+    const previousSmtp = process.env.SMTP_TO;
+    process.env.CONTROLLER_REMEDIATION_ENABLED = 'true';
+    delete process.env.SMTP_TO;
+    await applyStoredSettings(store);
+    expect(process.env.CONTROLLER_REMEDIATION_ENABLED).toBe('true');
+    const env = process.env as Record<string, string | undefined>;
+    expect(env.SMTP_TO).toBe('judge@example.com');
+    if (previousRemediation === undefined) delete process.env.CONTROLLER_REMEDIATION_ENABLED;
+    else process.env.CONTROLLER_REMEDIATION_ENABLED = previousRemediation;
+    if (previousSmtp === undefined) delete process.env.SMTP_TO;
+    else process.env.SMTP_TO = previousSmtp;
     store.close();
   });
 });

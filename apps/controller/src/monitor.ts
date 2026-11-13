@@ -105,6 +105,54 @@ export interface MonitorOptions {
   posthogEvidence?: () => Promise<string[]>;
   /** Same error repeated within one fetched batch, independent of the HTTP streak. */
   logSignal?: { evidence: string; occurrences: number; logs: RuntimeLog[]; deploymentId: string };
+  serviceId?: string;
+  repository?: string;
+  serviceRole?: 'app' | 'dependency';
+  sentryProject?: string;
+  posthogProject?: string;
+}
+
+/** Label the fault and refuse to roll back the app for an upstream failure. */
+export function assignCause(incident: Incident, options: Pick<MonitorOptions, 'serviceId' | 'serviceRole' | 'logSignal' | 'projectId'>): 'continue' | 'human' {
+  const text = `${options.logSignal?.evidence ?? ''}\n${incident.evidence.join('\n')}`;
+  const upstream = /upstream dependency/i.test(text);
+  if (options.serviceId) {
+    incident.targetId = options.serviceId;
+    incident.affectedServices = [options.serviceId];
+  }
+  incident.timing = { ...(incident.timing ?? {}), decidedAt: incident.detectedAt };
+  if (upstream && options.serviceRole !== 'dependency') {
+    incident.kind = 'dependency_failure';
+    incident.cause = 'failing_dependency';
+    incident.decision = 'escalate';
+    incident.status = 'needs_human';
+    incident.escalation = {
+      reason: 'The app reported an upstream dependency failure. The app deployment was not changed.',
+      at: incident.detectedAt,
+      recommendedNextStep: 'Check the dependency service. Roll back that service only if its own probe is failing.',
+    };
+    incident.events.push(event(incident.detectedAt, 'decision', 'Wake a human. Do not roll back the app for an upstream failure.'));
+    return 'human';
+  }
+  if (options.serviceRole === 'dependency' || incident.kind === 'dependency_failure') {
+    incident.kind = 'dependency_failure';
+    incident.cause = 'failing_dependency';
+  } else if (options.logSignal) {
+    incident.cause = 'code_regression';
+  } else if (incident.kind === 'build_failure' || incident.decision === 'rollback') {
+    incident.cause = 'bad_deploy';
+  }
+  const touched = options.serviceId ?? options.projectId;
+  incident.actions = [...(incident.actions ?? []), {
+    kind: incident.decision === 'rollback' ? 'rollback' : 'fix_pr',
+    target: touched,
+    dryRun: true,
+    policyResult: 'dry_run',
+    policyReason: `Would touch only ${touched}. Nothing has been changed yet.`,
+    attempt: 1,
+    at: incident.detectedAt,
+  }];
+  return 'continue';
 }
 
 export type MonitorResult =
@@ -203,7 +251,9 @@ export async function finishRemediation(
       const actionUrl = safeLink(result.actionUrl);
       if (actionUrl) incident.actionUrl = actionUrl;
       incident.evidence.push(...(result.evidence ?? []).map(evidence));
-      incident.events.push(event(new Date().toISOString(), 'draft_pr', result.message));
+      const actionAt = new Date().toISOString();
+      incident.timing = { ...(incident.timing ?? {}), actionAt };
+      incident.events.push(event(actionAt, 'draft_pr', result.message));
     } else {
       incident.status = 'remediation_failed';
       incident.decision = 'fix_pr';
@@ -445,7 +495,7 @@ export async function checkProject(options: MonitorOptions): Promise<MonitorResu
       updated = true;
     }
     const fixAttempts = existing.events.filter(item => item.type === 'remediation_started').length;
-    const fixStoppedEarly = ['needs_human', 'remediation_failed'].includes(existing.status) && fixAttempts < 3
+    const fixStoppedEarly = ['needs_human', 'remediation_failed'].includes(existing.status) && fixAttempts < 10
       && !existing.events.some(item => item.type === 'draft_pr');
     if (fixStoppedEarly && options.actions?.remediate) {
       existing.events.push(event(now().toISOString(), 'remediation_retry', 'Retrying the fix. The previous attempt stopped before a pull request.'));
@@ -536,6 +586,10 @@ export async function checkProject(options: MonitorOptions): Promise<MonitorResu
     incident.evidence.push(evidence(`HTTP classification: ${classification.classification}. ${classification.reason}`));
     incident.events.push(event(now().toISOString(), 'classification', `${classification.classification}: ${classification.reason}`));
   }
+  if (assignCause(incident, options) === 'human') {
+    await saveAndNotify(incident, options);
+    return { action: 'incident', incident, probe: currentResponse };
+  }
   if (options.sentryEvidence) {
     try {
       const lines = await options.sentryEvidence();
@@ -586,6 +640,7 @@ export async function checkProject(options: MonitorOptions): Promise<MonitorResu
     const actionUrl = safeLink(rollback.actionUrl);
     if (actionUrl) incident.actionUrl = actionUrl;
     incident.events.push(event(now().toISOString(), 'rollback_completed', 'Rollback provider accepted the action; recovery is not yet verified.'));
+    incident.timing = { ...(incident.timing ?? {}), actionAt: now().toISOString() };
   } catch (error) {
     incident.status = 'remediation_failed';
     incident.decision = 'fix_pr';
@@ -616,8 +671,15 @@ export async function checkProject(options: MonitorOptions): Promise<MonitorResu
 
   if (recovered) {
     incident.status = 'recovered';
+    const verifiedAt = now().toISOString();
+    incident.timing = { ...(incident.timing ?? {}), verifiedRecoveryAt: verifiedAt };
+    incident.verification = {
+      passed: true,
+      journeyCheck: { result: 'pass', at: verifiedAt, detail: verificationEvidence },
+      serviceChecks: [{ serviceId: options.serviceId ?? options.projectId, result: 'pass', at: verifiedAt }],
+    };
     incident.evidence.push('The failing commit was removed from production by restoring the previous deployment.');
-    incident.events.push(event(now().toISOString(), 'verification', `Production recovery verified: ${verificationEvidence}`));
+    incident.events.push(event(verifiedAt, 'verification', `Production recovery verified: ${verificationEvidence}`));
   } else {
     incident.status = 'remediation_failed';
     incident.decision = 'fix_pr';

@@ -65,6 +65,7 @@ export function parseIncident(value: unknown): Incident {
   for (const key of optional) if (item[key] !== undefined) incident[key] = text(item[key]);
   if (item.decision !== undefined) incident.decision = item.decision as Incident['decision'];
   if (typeof item.targetId === 'string') incident.targetId = text(item.targetId, 80);
+  if (item.cause === 'code_regression' || item.cause === 'bad_deploy' || item.cause === 'failing_dependency') incident.cause = item.cause;
   if (item.classification !== undefined) incident.classification = enumValue(item.classification, classifications, undefined, 'classification');
   if (item.evidenceSources !== undefined) incident.evidenceSources = stringList(item.evidenceSources, 20, 'evidence sources', 40);
   if (item.affectedServices !== undefined) incident.affectedServices = stringList(item.affectedServices, 20, 'affected services', 80);

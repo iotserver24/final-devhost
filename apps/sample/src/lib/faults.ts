@@ -4,7 +4,7 @@
 // The fault label is intentionally NOT exposed through diagnosis evidence
 // endpoints; only observed behavior is.
 
-export type FaultMode = "healthy" | "runtime" | "persistent" | "dependency" | "ambiguous";
+export type FaultMode = "healthy" | "runtime" | "persistent" | "dependency" | "config" | "ambiguous";
 export type FaultKind = "bad-deployment" | "broken-config" | "failing-dependency" | "none";
 
 export type FaultState = {
@@ -17,7 +17,7 @@ export type FaultState = {
 
 function envFaultMode(): FaultMode | null {
   const mode = process.env.DEMO_FAULT_MODE;
-  if (mode === "runtime" || mode === "persistent" || mode === "dependency" || mode === "ambiguous") {
+  if (mode === "runtime" || mode === "persistent" || mode === "dependency" || mode === "config" || mode === "ambiguous") {
     return mode;
   }
   return null;
@@ -43,7 +43,7 @@ export function setFaultMode(mode: FaultMode): FaultState {
   // Map env-style modes onto the runtime control kinds where they overlap.
   if (mode === "runtime") return injectFault("bad-deployment");
   if (mode === "dependency") return injectFault("failing-dependency");
-  if (mode === "persistent") return injectFault("broken-config");
+  if (mode === "persistent" || mode === "config") return injectFault("broken-config");
   return resetFault();
 }
 

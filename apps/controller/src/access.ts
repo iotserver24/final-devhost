@@ -22,9 +22,12 @@ export function requiredRole(method: string, pathname: string): DashboardRole | 
   if (pathname === '/api/disconnect') return 'admin';
   if (pathname.startsWith('/api/github/connect')) return 'admin';
   if (pathname.startsWith('/api/vercel/connect')) return 'admin';
+  if (pathname.startsWith('/api/render/connect')) return 'admin';
 
   // Reading configuration exposes integration names but never secrets; admins.
   if (pathname === '/api/settings' && upper === 'GET') return 'admin';
+  if (pathname === '/api/watched-services') return 'admin';
+  if (pathname === '/api/vercel/deployments') return 'admin';
 
   // Actions and monitoring control: operators.
   if (pathname.startsWith('/api/actions/')) return 'operator';

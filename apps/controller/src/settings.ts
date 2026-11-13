@@ -16,6 +16,7 @@ export const settingFields: SettingField[] = [
   { group: 'Vercel', key: 'VERCEL_REFRESH_TOKEN', label: 'Refresh token', secret: true },
   { group: 'Vercel', key: 'VERCEL_TEAM_ID', label: 'Team id', secret: false, hidden: true, clientOwned: true },
   { group: 'Vercel', key: 'VERCEL_PROJECT_ID', label: 'Project id', secret: false, clientOwned: true },
+  { group: 'Vercel', key: 'CONTROLLER_WATCH_DEPLOYMENT_ID', label: 'Watched deployment', secret: false, hidden: true, clientOwned: true },
   { group: 'Vercel', key: 'CONTROLLER_ROLLBACK_PROJECT_ID', label: 'Rollback project id', secret: false, hidden: true, clientOwned: true },
   { group: 'Vercel', key: 'VERCEL_PRODUCTION_DOMAIN', label: 'Public site link (host only)', secret: false, clientOwned: true },
   { group: 'Vercel', key: 'CONTROLLER_PROBE_PATH', label: 'Probe path', secret: false, clientOwned: true },
@@ -26,7 +27,8 @@ export const settingFields: SettingField[] = [
   { group: 'Railway', key: 'RAILWAY_SERVICE_ID', label: 'Service id', secret: false },
   { group: 'Railway', key: 'RAILWAY_ENVIRONMENT_ID', label: 'Environment id (optional)', secret: false },
   { group: 'Railway', key: 'RAILWAY_PRODUCTION_URL', label: 'Public production URL', secret: false },
-  { group: 'Render', key: 'RENDER_API_KEY', label: 'API key', secret: true },
+  { group: 'Render', key: 'RENDER_API_KEY', label: 'API key or CLI token (filled by Connect Render)', secret: true },
+  { group: 'Render', key: 'RENDER_REFRESH_TOKEN', label: 'CLI refresh token', secret: true, hidden: true },
   { group: 'Render', key: 'RENDER_OWNER_ID', label: 'Workspace owner id', secret: false },
   { group: 'Render', key: 'RENDER_SERVICE_ID', label: 'Service id', secret: false },
   { group: 'Render', key: 'RENDER_PRODUCTION_URL', label: 'Public production URL', secret: false },
@@ -64,7 +66,8 @@ export async function applyStoredSettings(store: Pick<IncidentStore, 'readSettin
     else delete process.env[key];
   }
   for (const [key, value] of Object.entries(saved)) {
-    if (allowed.has(key) && !clientOwned.has(key) && value) process.env[key] = value;
+    // Host environment wins. A saved dashboard value fills a key the host left empty.
+    if (allowed.has(key) && !clientOwned.has(key) && value && !process.env[key]) process.env[key] = value;
   }
 }
 
@@ -77,11 +80,12 @@ export function createSettingsApi(store: Pick<IncidentStore, 'readSettings' | 'w
       return Response.json({
         restartRequired: true,
         fields: settingFields.filter(field => !field.hidden).map(field => {
-          const value = saved[field.key] || (field.clientOwned ? '' : process.env[field.key] || '');
+          const fromHost = !field.clientOwned ? process.env[field.key] || '' : '';
+          const value = fromHost || saved[field.key] || '';
           return {
             ...field,
             configured: Boolean(value),
-            source: saved[field.key] ? 'saved' : value ? 'environment' : 'missing',
+            source: fromHost ? 'environment' : saved[field.key] ? 'saved' : 'missing',
             value: field.secret ? '' : value,
           };
         }),

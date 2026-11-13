@@ -26,12 +26,24 @@ export function Setup({ onClose }: { onClose: () => void }) {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [vercel, setVercel] = useState<VercelConnect>(null);
+  const [renderLogin, setRenderLogin] = useState<VercelConnect>(null);
+  const [renderOwners, setRenderOwners] = useState<{ id: string; name: string }[]>([]);
   const [repos, setRepos] = useState<string[]>([]);
   const [repoQuery, setRepoQuery] = useState('');
   const [projects, setProjects] = useState<{ id: string; name: string; domains: string[]; teamId?: string }[]>([]);
+  const [deployments, setDeployments] = useState<{ id: string; url: string; state: string; createdAt: string; ref: string; sha: string }[]>([]);
   const [monitorNote, setMonitorNote] = useState('');
   const [githubListNote, setGithubListNote] = useState('Repository list has not loaded.');
   const [vercelListNote, setVercelListNote] = useState('Project list has not loaded.');
+  const [services, setServices] = useState<{ id: string; name: string; repository: string; role: string; probePath: string; enabled: boolean }[]>([]);
+  const [serviceDraft, setServiceDraft] = useState({ name: '', repository: '', vercelProjectId: '', productionHost: '', probePath: '/api/tasks', role: 'app' });
+
+  const loadServices = useCallback(async () => {
+    const response = await fetch('/api/watched-services', { credentials: 'same-origin' });
+    if (!response.ok) return;
+    const body = await response.json() as { services?: { id: string; name: string; repository: string; role: string; probePath: string; enabled: boolean }[] };
+    setServices(body.services ?? []);
+  }, []);
 
   const loadSettings = useCallback(async (signal?: AbortSignal) => {
     const response = await fetch('/api/settings', { credentials: 'same-origin', headers: { Accept: 'application/json' }, signal });
@@ -51,8 +63,9 @@ export function Setup({ onClose }: { onClose: () => void }) {
     void loadSettings(abort.signal).catch(reason => {
       if (!abort.signal.aborted) setError(reason instanceof Error ? reason.message : 'Settings could not be loaded.');
     });
+    void loadServices();
     return () => abort.abort();
-  }, [loadSettings]);
+  }, [loadSettings, loadServices]);
 
   const field = useMemo(() => new Map(fields.map(item => [item.key, item])), [fields]);
   const githubReady = Boolean(field.get('GITHUB_INSTALLATION_ID')?.configured);
@@ -96,6 +109,19 @@ export function Setup({ onClose }: { onClose: () => void }) {
       .catch(() => { if (!abort.signal.aborted) setVercelListNote('Project list did not load.'); });
     return () => abort.abort();
   }, [fields.length, vercelReady]);
+
+  useEffect(() => {
+    const projectId = draft.VERCEL_PROJECT_ID;
+    if (!projectId || !vercelReady) { setDeployments([]); return; }
+    const abort = new AbortController();
+    void fetch(`/api/vercel/deployments?projectId=${encodeURIComponent(projectId)}`, { headers: { Accept: 'application/json' }, signal: abort.signal })
+      .then(async response => {
+        const body = await response.json().catch(() => ({})) as { deployments?: { id: string; url: string; state: string; createdAt: string; ref: string; sha: string }[] };
+        if (!abort.signal.aborted) setDeployments(body.deployments ?? []);
+      })
+      .catch(() => { if (!abort.signal.aborted) setDeployments([]); });
+    return () => abort.abort();
+  }, [draft.VERCEL_PROJECT_ID, vercelReady]);
   const groups = [...new Set(fields.map(item => item.group).filter(group => group !== 'Vercel'))];
   const setValue = (key: string, value: string) => setDraft(current => ({ ...current, [key]: value }));
 
@@ -140,6 +166,31 @@ export function Setup({ onClose }: { onClose: () => void }) {
     }
   }
 
+  async function connectRender() {
+    setError('');
+    try {
+      const started = await fetch('/api/render/connect', { method: 'POST', headers: { Accept: 'application/json' } });
+      if (!started.ok) throw new Error('Render sign-in did not start.');
+      const body = await started.json() as { userCode: string; verificationUri: string; intervalMs: number };
+      setRenderLogin({ userCode: body.userCode, verificationUri: body.verificationUri, status: 'Waiting for approval in the Render dashboard.' });
+      window.open(body.verificationUri, '_blank', 'noopener');
+      const timer = window.setInterval(async () => {
+        const poll = await fetch('/api/render/connect', { headers: { Accept: 'application/json' } });
+        if (poll.status === 404) { window.clearInterval(timer); setError('Render sign-in expired. Start it again.'); return; }
+        if (!poll.ok) return;
+        const result = await poll.json() as { ok?: boolean; owners?: { id: string; name: string }[] };
+        if (result.ok) {
+          window.clearInterval(timer);
+          setRenderOwners(result.owners ?? []);
+          setRenderLogin(current => current ? { ...current, status: result.owners?.length === 1 ? 'Connected. Workspace saved.' : 'Connected. Choose the workspace.' } : current);
+          await loadSettings();
+        }
+      }, Math.max(body.intervalMs, 5000));
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Render sign-in did not start.');
+    }
+  }
+
   async function choose(key: string, value: string, extra?: Record<string, string>) {
     setValue(key, value);
     const response = await fetch('/api/settings', {
@@ -151,7 +202,7 @@ export function Setup({ onClose }: { onClose: () => void }) {
     else await loadSettings();
   }
 
-  async function disconnect(provider: 'github' | 'vercel') {
+  async function disconnect(provider: 'github' | 'vercel' | 'render') {
     setError('');
     const response = await fetch('/api/disconnect', {
       method: 'POST',
@@ -162,6 +213,7 @@ export function Setup({ onClose }: { onClose: () => void }) {
     if (!response.ok) { setError(body.error || 'Disconnect did not finish.'); return; }
     if (provider === 'github') { setRepos([]); setGithubListNote('GitHub access was disconnected.'); }
     if (provider === 'vercel') { setProjects([]); setVercel(null); setVercelListNote('Vercel was disconnected.'); setMonitorNote('Monitor stopped.'); }
+    if (provider === 'render') { setRenderLogin(null); setRenderOwners([]); }
     setDraft(current => ({ ...current, ...(provider === 'github' ? { REMEDIATOR_REPOSITORY: '' } : { VERCEL_PROJECT_ID: '' }) }));
     await loadSettings();
   }
@@ -201,13 +253,41 @@ export function Setup({ onClose }: { onClose: () => void }) {
     <div className="setup-header">
       <div>
         <p className="eyebrow">Control room / configuration</p>
-        <h1>Connect your stack</h1>
-        <p className="setup-lede">Give Sentinel the smallest set of credentials it needs to watch one Vercel project and report evidence here.</p>
+        <h1>Setup</h1>
+        <p className="setup-lede">Pick the repository, the Vercel project, and the deployment Sentinel should watch.</p>
       </div>
-      <button className="button button-ghost" type="button" onClick={onClose}>Back to incidents</button>
+      <a className="button button-ghost" href="/">Incidents</a>
     </div>
 
-    <p className="setup-note">Railway, Render, and Coolify use scoped API tokens below. Select the active platform, provide its public production URL and service/application ID, then restart Sentinel. Deployment logs are attached to incident evidence and rollback remains opt-in.</p>
+    <section className="setup-hero" aria-labelledby="services-title">
+      <div className="setup-hero-copy"><div><h2 id="services-title">Watched services</h2><p>Each row is one repository and one Vercel project. The app and a dependency are watched separately.</p></div></div>
+      <ul>{services.map(service => <li key={service.id}>{service.name} · {service.repository} · {service.role} · {service.probePath} <button type="button" onClick={() => void fetch(`/api/watched-services?id=${service.id}`, { method: 'DELETE', credentials: 'same-origin' }).then(() => loadServices())}>Remove</button></li>)}</ul>
+      {services.length === 0 && <p>No extra services yet. The current saved target is added on controller start.</p>}
+      <button type="button" onClick={() => void loadServices()}>Refresh services</button>
+      <label className="setup-field">Name<input value={serviceDraft.name} onChange={event => setServiceDraft({ ...serviceDraft, name: event.target.value })} /></label>
+      <label className="setup-field">Repository<input value={serviceDraft.repository} placeholder="owner/name" onChange={event => setServiceDraft({ ...serviceDraft, repository: event.target.value })} /></label>
+      <label className="setup-field">Vercel project id<input value={serviceDraft.vercelProjectId} onChange={event => setServiceDraft({ ...serviceDraft, vercelProjectId: event.target.value })} /></label>
+      <label className="setup-field">Host<input value={serviceDraft.productionHost} onChange={event => setServiceDraft({ ...serviceDraft, productionHost: event.target.value })} /></label>
+      <label className="setup-field">Probe<input value={serviceDraft.probePath} onChange={event => setServiceDraft({ ...serviceDraft, probePath: event.target.value })} /></label>
+      <label className="setup-field">Role<select value={serviceDraft.role} onChange={event => setServiceDraft({ ...serviceDraft, role: event.target.value })}><option value="app">app</option><option value="dependency">dependency</option></select></label>
+      <button type="button" onClick={() => void fetch('/api/watched-services', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(serviceDraft) }).then(() => loadServices())}>Add service</button>
+    </section>
+
+    <section className="setup-hero" aria-labelledby="render-title">
+      <div className="setup-hero-copy">
+        <div>
+          <h2 id="render-title">Render</h2>
+          <p>Same device login as the Render CLI. The token is what logs and rollback already send as a bearer.</p>
+          {renderLogin && <p className="connect-status"><strong>{renderLogin.status}</strong> Code <code>{renderLogin.userCode}</code> · <a href={renderLogin.verificationUri} target="_blank" rel="noreferrer">open Render</a></p>}
+          {renderOwners.length > 1 && <ul>{renderOwners.map(owner => <li key={owner.id}><button type="button" onClick={() => void choose('RENDER_OWNER_ID', owner.id)}>{owner.name}</button></li>)}</ul>}
+        </div>
+      </div>
+      <div className="setup-hero-actions">
+        <button className="button button-primary" type="button" onClick={() => void connectRender()}>Connect Render</button>
+        <button className="button button-ghost" type="button" onClick={() => void disconnect('render')}>Disconnect</button>
+      </div>
+    </section>
+    <p className="setup-note">Railway and Coolify still take a pasted token below. Render can use Connect Render instead. Set the public production URL and service id, then restart Sentinel. Logs attach to the incident. Rollback stays off until you turn it on.</p>
 
     {error && <div className="error-box" role="alert"><strong>Setup needs attention</strong><p>{error}</p></div>}
 
@@ -274,6 +354,13 @@ export function Setup({ onClose }: { onClose: () => void }) {
           }}>
             <option value="">Choose a project</option>
             {projects.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}
+          </select>
+        </label>
+        <label className="setup-field">
+          <span>Deployment for this project</span>
+          <select value={deployments.some(item => item.id === draft.CONTROLLER_WATCH_DEPLOYMENT_ID) ? draft.CONTROLLER_WATCH_DEPLOYMENT_ID : ''} onChange={event => { void choose('CONTROLLER_WATCH_DEPLOYMENT_ID', event.target.value); }}>
+            <option value="">{deployments.length ? 'Choose a deployment' : 'No deployments loaded'}</option>
+            {deployments.map(item => <option key={item.id} value={item.id}>{item.state} · {item.ref || 'no branch'} · {item.sha || item.id.slice(0, 8)} · {item.url}</option>)}
           </select>
         </label>
         <div className="field-grid field-grid-2">

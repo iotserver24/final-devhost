@@ -72,6 +72,7 @@ export function appJwt(appId: string, pem: string, now = Date.now()): string {
 export const disconnectFields = {
   github: ['GITHUB_INSTALLATION_ID', 'REMEDIATOR_REPOSITORY', 'REMEDIATOR_ALLOWED_REPOSITORY'],
   vercel: ['VERCEL_ACCESS_TOKEN', 'VERCEL_REFRESH_TOKEN', 'VERCEL_TEAM_ID', 'VERCEL_PROJECT_ID', 'CONTROLLER_ROLLBACK_PROJECT_ID', 'VERCEL_PRODUCTION_DOMAIN', 'CONTROLLER_PROBE_PATH'],
+  render: ['RENDER_API_KEY', 'RENDER_REFRESH_TOKEN', 'RENDER_OWNER_ID', 'RENDER_SERVICE_ID', 'RENDER_PRODUCTION_URL'],
 } as const;
 
 export function githubConnectTarget(slug: string | undefined, appId: string | undefined): { redirect: string } | { error: string } {

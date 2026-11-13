@@ -6,7 +6,8 @@ import { createIncidentApi } from './api';
 import { ActivityHub } from './activity';
 import { createActivityApi } from './activity-api';
 import { dispatchRun } from './remediation';
-import { startPollingWorker, type PollingWorker } from './worker';
+import { startPollingWorker, type PollingWorker, type WatchTarget } from './worker';
+import { ensureLegacyWatchedService, parseWatchedService, type WatchedService } from './services';
 import { VercelProvider } from './vercel-provider';
 import { CoolifyProvider, RailwayProvider, RenderProvider } from './platform-providers';
 import { checkProject, runtimeLogSignal, type DeploymentProvider, type DeploymentSummary, type RuntimeLog } from './monitor';
@@ -19,6 +20,7 @@ import { posthogFromEnvironment } from './posthog';
 import { sentryFromEnvironment } from './sentry';
 import { disconnectFields, exchangeGithubManifest, githubConnectTarget, githubCredentials, githubStateOk, installationExists, listInstallationRepositories, matchingVercelProject, verifyGithubWebhook } from './github-app';
 import { pollVercelDevice, startVercelDevice } from './vercel-login';
+import { listRenderOwners, pollRenderDevice, startRenderDevice } from './render-login';
 import { DashboardAuth } from './auth';
 import { AuditLog, RateLimiter, requiredRole, roleAllows } from './access';
 import { DeliveryLedger, RunLock, readCommentWebhook, chooseStrategy, buildFollowupContext } from './pr-followup';
@@ -137,23 +139,31 @@ if (remediationFlag === 'true') {
   if (!process.env.GITHUB_READ_TOKEN && !githubAppReady) missing.push('GITHUB_READ_TOKEN or a connected GitHub app');
   if (!process.env.REMEDIATOR_REPOSITORY) missing.push('REMEDIATOR_REPOSITORY');
   if (missing.length) throw new Error(`Remediation requires configuration: ${missing.join(', ')}.`);
+  const pathPrefix = `${(process.env.REMEDIATOR_ALLOWED_PATH_PREFIX?.trim() || 'apps/sample/').replace(/\/?$/, '/')}`;
+  const standaloneSample = pathPrefix === 'src/';
+  const fixturePath = `${pathPrefix}tests/crash.repro.test.ts`;
+  const configuredFixture = process.env.REMEDIATOR_FIXTURE_PATH?.trim();
+  const fixturePattern = new RegExp(`^${pathPrefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}tests/[A-Za-z0-9._/-]+\\.test\\.ts$`);
+  const safeFixturePath = configuredFixture && fixturePattern.test(configuredFixture) ? configuredFixture : fixturePath;
   remediation = {
     repository: process.env.REMEDIATOR_REPOSITORY ?? '',
-    setupCommand: process.env.REMEDIATOR_SETUP_COMMAND ?? 'bun install --frozen-lockfile --filter ./apps/sample',
-    reproduceCommand: process.env.REMEDIATOR_REPRODUCE_COMMAND ?? 'bun test apps/sample/tests/filter.repro.test.ts',
-    testCommand: process.env.REMEDIATOR_TEST_COMMAND ?? 'bun run --cwd apps/sample test',
-    buildCommand: process.env.REMEDIATOR_BUILD_COMMAND ?? 'bun run --cwd apps/sample build',
+    setupCommand: process.env.REMEDIATOR_SETUP_COMMAND ?? (standaloneSample ? 'bun install --frozen-lockfile' : 'bun install --frozen-lockfile --filter ./apps/sample'),
+    reproduceCommand: `bun test ${safeFixturePath}`,
+    testCommand: standaloneSample ? `bun test ${safeFixturePath}` : (process.env.REMEDIATOR_TEST_COMMAND ?? 'bun run --cwd apps/sample test'),
+    buildCommand: process.env.REMEDIATOR_BUILD_COMMAND ?? (standaloneSample ? 'bun run build' : 'bun run --cwd apps/sample build'),
     provider: {
       modelName: process.env.REMEDIATOR_MODEL_NAME ?? 'dedicated-remediator',
       modelId: process.env.REMEDIATOR_MODEL_ID!,
       baseUrl: process.env.REMEDIATOR_MODEL_BASE_URL!,
-      apiBackend: (process.env.REMEDIATOR_MODEL_API_BACKEND ?? 'responses') as RemediationConfig['provider']['apiBackend'],
+      apiBackend: (process.env.REMEDIATOR_MODEL_API_BACKEND ?? 'chat_completions') as RemediationConfig['provider']['apiBackend'],
       apiKey: process.env.REMEDIATOR_MODEL_API_KEY!,
       githubReadToken: process.env.GITHUB_READ_TOKEN ?? 'github-app',
     },
     reproductionFixture: {
-      path: process.env.REMEDIATOR_FIXTURE_PATH ?? 'apps/sample/tests/filter.repro.test.ts',
-      sourceFile: resolve(packageDirectory, '..', '..', process.env.REMEDIATOR_FIXTURE_SOURCE ?? 'packages/remediator/fixtures/task-filter.repro.ts.txt'),
+      path: safeFixturePath,
+      sourceFile: resolve(packageDirectory, '..', '..', standaloneSample || safeFixturePath.startsWith('src/')
+        ? 'packages/remediator/fixtures/task-crash.src.test.ts.txt'
+        : 'packages/remediator/fixtures/task-crash.sample.test.ts.txt'),
     },
   };
 }
@@ -211,6 +221,7 @@ const watch = {
 };
 
 let vercelDevice: { code: string; expiresAt: number } | undefined;
+let renderDevice: { code: string; expiresAt: number } | undefined;
 let monitorWorker: PollingWorker | undefined;
 let logsTimer: ReturnType<typeof setInterval> | undefined;
 let deploymentWatchTimer: ReturnType<typeof setInterval> | undefined;
@@ -236,14 +247,46 @@ const posthog = posthogFromEnvironment();
 if (posthog.configured()) console.info('PostHog evidence source is configured (advisory only).');
 const posthogEvidence = () => posthog.evidenceLines();
 
-function launchMonitor(config: MonitorConfig): void {
+function providerForService(config: MonitorConfig, service: WatchedService): DeploymentProvider {
+  if (config.platform !== 'vercel') return config.provider;
+  if (service.vercelProjectId === config.projectId && service.productionHost === (process.env.VERCEL_PRODUCTION_DOMAIN ?? '').toLowerCase()) {
+    return config.provider;
+  }
+  const token = process.env.VERCEL_ACCESS_TOKEN;
+  if (!token) return config.provider;
+  return new VercelProvider({
+    accessToken: token,
+    projectId: service.vercelProjectId,
+    productionDomain: service.productionHost,
+    teamId: service.teamId || process.env.VERCEL_TEAM_ID,
+    runtimeLogWindowMs: config.logsIntervalMs + 30_000,
+  });
+}
+
+async function launchMonitor(config: MonitorConfig): Promise<void> {
   if (monitorWorker) return;
-  watch.probePath = config.probePath;
+  await store.ready;
+  await ensureLegacyWatchedService(store);
+  const services = (await store.listWatchedServices()).filter(service => service.enabled);
+  const targets: WatchTarget[] = services.length
+    ? services.map(service => ({
+      projectId: service.vercelProjectId,
+      probePath: service.probePath,
+      serviceId: service.id,
+      repository: service.repository,
+      role: service.role,
+      provider: providerForService(config, service),
+      ...(service.sentryProject ? { sentryProject: service.sentryProject } : {}),
+      ...(service.posthogProject ? { posthogProject: service.posthogProject } : {}),
+    }))
+    : [{ projectId: config.projectId, probePath: config.probePath, provider: config.provider, role: 'app' }];
+  watch.probePath = targets[0]?.probePath ?? config.probePath;
   watch.rollbackEnabled = config.rollbackEnabled;
   watch.intervalMs = config.pollIntervalMs;
   monitorWorker = startPollingWorker({
-    projectIds: [config.projectId],
-    allowlistedProjectIds: config.rollbackEnabled ? new Set([config.projectId]) : new Set(),
+    projectIds: targets.map(target => target.projectId),
+    targets,
+    allowlistedProjectIds: config.rollbackEnabled ? new Set(targets.map(target => target.projectId)) : new Set(),
     probePath: config.probePath,
     provider: config.provider,
     store,
@@ -355,19 +398,23 @@ function launchMonitor(config: MonitorConfig): void {
         return typeof value === 'function' ? value.bind(target) : value;
       },
     });
-    const observeRuntime = async (deploymentId: string, logs: RuntimeLog[], fresh: RuntimeLog[]): Promise<void> => {
+    const observeRuntime = async (target: WatchTarget, deploymentId: string, logs: RuntimeLog[], fresh: RuntimeLog[]): Promise<void> => {
       const signal = runtimeLogSignal(logs, fresh, deploymentId);
       if (!signal) return;
+      const upstream = /upstream dependency/i.test(signal.evidence);
       const result = await checkProject({
-        projectId: config.projectId,
-        allowlistedProjectIds: config.rollbackEnabled ? new Set([config.projectId]) : new Set(),
-        probePath: config.probePath,
-        provider: logProvider,
+        projectId: target.projectId,
+        allowlistedProjectIds: config.rollbackEnabled ? new Set([target.projectId]) : new Set(),
+        probePath: target.probePath || config.probePath,
+        provider: target.provider ?? logProvider,
+        ...(target.serviceId ? { serviceId: target.serviceId } : {}),
+        ...(target.repository ? { repository: target.repository } : {}),
+        ...(target.role ? { serviceRole: target.role } : {}),
+        sentryEvidence: () => sentry.evidenceLines(upstream ? undefined : target.sentryProject),
+        posthogEvidence: () => posthog.evidenceLines(upstream ? undefined : target.posthogProject),
         store,
         actions,
         classificationPolicy,
-        sentryEvidence,
-    posthogEvidence,
         logSignal: signal,
       });
       if (result.action === 'monitor' && result.consecutiveFailures > watch.failures) {
@@ -392,14 +439,24 @@ function launchMonitor(config: MonitorConfig): void {
           if (!pulled.has(deployment.id) || incomplete.has(deployment.id)) await pullDeployment(deployment);
         }
         if (config.provider.getRuntimeLogs) {
-          const current = await config.provider.getProductionDeployment(config.projectId);
-          if (current) {
-            const logs = await config.provider.getRuntimeLogs(config.projectId, current.id);
-            const fresh = await store.saveRuntimeLogs(config.projectId, current.id, logs);
-            watch.deployment = { id: current.id, url: current.immutableUrl, createdAt: current.createdAt };
-            watch.logsSource = 'runtime-logs';
-            watch.logs = logs.slice(-200);
-            await observeRuntime(current.id, logs, fresh);
+          for (const target of targets) {
+            const provider = target.provider ?? config.provider;
+            if (!provider.getRuntimeLogs || !provider.getProductionDeployment) continue;
+            try {
+              const current = await provider.getProductionDeployment(target.projectId);
+              if (!current) continue;
+              const logs = await provider.getRuntimeLogs(target.projectId, current.id);
+              const fresh = await store.saveRuntimeLogs(target.projectId, current.id, logs);
+              if (target.projectId === targets[0]?.projectId) {
+                watch.deployment = { id: current.id, url: current.immutableUrl, createdAt: current.createdAt };
+                watch.logsSource = 'runtime-logs';
+                watch.logs = logs.slice(-200);
+              }
+              await observeRuntime(target, current.id, logs, fresh);
+            } catch (error) {
+              if (target.projectId === targets[0]?.projectId) throw error;
+              console.error(`Log pull failed for ${target.projectId}.`);
+            }
           }
         }
         watch.logsCheckedAt = new Date().toISOString();
@@ -447,6 +504,26 @@ async function stopMonitor(): Promise<void> {
   monitorWorker = undefined;
   await localEngine?.stop();
   localEngine = undefined;
+}
+
+async function probeWatchedSite(host: string, probePath: string): Promise<{ state: 'up' | 'down' | 'unknown'; detail: string; statusCode: number | null }> {
+  const paths = [...new Set(['/api/health', probePath].filter(path => path.startsWith('/')))];
+  const results: string[] = [];
+  let statusCode: number | null = null;
+  let down = false;
+  for (const path of paths) {
+    try {
+      const response = await fetch(`https://${host}${path}`, { signal: AbortSignal.timeout(5000), redirect: 'manual', headers: { Accept: 'application/json' } });
+      statusCode = response.status;
+      if (response.status >= 200 && response.status < 300) results.push(`${path} ${response.status}`);
+      else { down = true; results.push(`${path} ${response.status}`); }
+    } catch {
+      down = true;
+      results.push(`${path} unreachable`);
+    }
+  }
+  if (results.length === 0) return { state: 'unknown', detail: 'No probe path.', statusCode: null };
+  return { state: down ? 'down' : 'up', detail: results.join(' · '), statusCode };
 }
 
 // --- Local demo monitor (BE2): watches BE1's TaskFlow services and acts through the broker. ---
@@ -607,11 +684,33 @@ async function integrationRoutes(request: Request, settingsStore: typeof store):
       return Response.json({ error: 'Vercel did not list projects.' }, { status: 502 });
     }
   }
+  if (url.pathname === '/api/vercel/deployments' && request.method === 'GET') {
+    const token = process.env.VERCEL_ACCESS_TOKEN;
+    const projectId = url.searchParams.get('projectId') || process.env.VERCEL_PROJECT_ID || '';
+    if (!token || !projectId) return Response.json({ deployments: [], error: 'Connect Vercel and choose a project first.' }, { status: 400 });
+    const api = new URL('https://api.vercel.com/v6/deployments');
+    api.searchParams.set('projectId', projectId);
+    api.searchParams.set('limit', '15');
+    const teamId = process.env.VERCEL_TEAM_ID;
+    if (teamId) api.searchParams.set('teamId', teamId);
+    const response = await fetch(api, { headers: { Authorization: `Bearer ${token}` } });
+    if (!response.ok) return Response.json({ deployments: [], error: 'Vercel did not list deployments.' }, { status: 502 });
+    const body = await response.json() as { deployments?: { uid?: string; url?: string; state?: string; created?: number; meta?: { githubCommitRef?: string; githubCommitSha?: string } }[] };
+    const deployments = (body.deployments ?? []).flatMap(item => item.uid ? [{
+      id: item.uid,
+      url: item.url ?? '',
+      state: item.state ?? 'UNKNOWN',
+      createdAt: item.created ? new Date(item.created).toISOString() : '',
+      ref: item.meta?.githubCommitRef ?? '',
+      sha: item.meta?.githubCommitSha?.slice(0, 7) ?? '',
+    }] : []);
+    return Response.json({ deployments, selected: process.env.CONTROLLER_WATCH_DEPLOYMENT_ID ?? '' });
+  }
   if (url.pathname === '/api/disconnect' && request.method === 'POST') {
     let body: unknown;
     try { body = await request.json(); } catch { return Response.json({ error: 'Expected JSON.' }, { status: 400 }); }
     const provider = body && typeof body === 'object' && 'provider' in body ? (body as { provider?: unknown }).provider : undefined;
-    if (provider !== 'github' && provider !== 'vercel') return Response.json({ error: 'Choose github or vercel to disconnect.' }, { status: 400 });
+    if (provider !== 'github' && provider !== 'vercel' && provider !== 'render') return Response.json({ error: 'Choose github, vercel, or render to disconnect.' }, { status: 400 });
     const keys = [...disconnectFields[provider]];
     await settingsStore.deleteSettings(keys);
     for (const key of keys) delete process.env[key];
@@ -662,6 +761,36 @@ async function integrationRoutes(request: Request, settingsStore: typeof store):
       return Response.json({ error: 'Vercel sign-in did not finish.' }, { status: 502 });
     }
   }
+  if (url.pathname === '/api/render/connect' && request.method === 'POST') {
+    try {
+      const device = await startRenderDevice();
+      renderDevice = { code: device.deviceCode, expiresAt: device.expiresAt };
+      return Response.json({ userCode: device.userCode, verificationUri: device.verificationUri, intervalMs: device.intervalMs });
+    } catch {
+      return Response.json({ error: 'Render sign-in did not start.' }, { status: 502 });
+    }
+  }
+  if (url.pathname === '/api/render/connect' && request.method === 'GET') {
+    if (!renderDevice || renderDevice.expiresAt < Date.now()) return Response.json({ error: 'Start Render sign-in again.' }, { status: 404 });
+    try {
+      const result = await pollRenderDevice(renderDevice.code);
+      if (result.pending) return Response.json({ pending: true });
+      if (!result.accessToken) return Response.json({ error: 'Render sign-in did not finish.' }, { status: 502 });
+      const owners = await listRenderOwners(result.accessToken);
+      await settingsStore.writeSettings({
+        RENDER_API_KEY: result.accessToken,
+        ...(result.refreshToken ? { RENDER_REFRESH_TOKEN: result.refreshToken } : {}),
+        ...(owners.length === 1 ? { RENDER_OWNER_ID: owners[0].id } : {}),
+      });
+      process.env.RENDER_API_KEY = result.accessToken;
+      if (result.refreshToken) process.env.RENDER_REFRESH_TOKEN = result.refreshToken;
+      if (owners.length === 1) process.env.RENDER_OWNER_ID = owners[0].id;
+      renderDevice = undefined;
+      return Response.json({ ok: true, owners, restartRequired: true });
+    } catch {
+      return Response.json({ error: 'Render sign-in did not finish.' }, { status: 502 });
+    }
+  }
   return null;
 }
 
@@ -701,6 +830,48 @@ const server = Bun.serve({
     if (connect) return connect;
     const settingsResponse = await settingsApi(request);
     if (settingsResponse) return settingsResponse;
+    if (url.pathname === '/api/watched-services') {
+      if (request.method === 'GET') return Response.json({ services: await store.listWatchedServices() });
+      if (request.method === 'DELETE') {
+        const id = url.searchParams.get('id') ?? '';
+        if (!/^svc-[a-z0-9-]{4,40}$/.test(id)) return Response.json({ error: 'Service id is required.' }, { status: 400 });
+        await store.deleteWatchedService(id);
+        return Response.json({ ok: true });
+      }
+      if (request.method !== 'POST') return Response.json({ error: 'Method not allowed.' }, { status: 405 });
+      let body: unknown;
+      try { body = await request.json(); } catch { return Response.json({ error: 'Expected JSON.' }, { status: 400 }); }
+      const parsed = parseWatchedService(body);
+      if ('error' in parsed) return Response.json({ error: parsed.error }, { status: 400 });
+      await store.saveWatchedService(parsed);
+      return Response.json({ ok: true, service: parsed });
+    }
+    if (url.pathname === '/api/fleet' && request.method === 'GET') {
+      const services = (await store.listWatchedServices()).filter(service => service.enabled);
+      const incidents = await store.list();
+      const sites = await Promise.all(services.map(async service => {
+        const health = await probeWatchedSite(service.productionHost, service.probePath);
+        const related = incidents.filter(incident => incident.targetId === service.id || incident.projectId === service.vercelProjectId);
+        const open = related.filter(incident => incident.status !== 'recovered');
+        const trackers = [service.sentryProject ? `Sentry ${service.sentryProject}` : '', service.posthogProject ? `PostHog ${service.posthogProject}` : ''].filter(Boolean);
+        return {
+          id: service.id,
+          name: service.name,
+          role: service.role,
+          host: service.productionHost,
+          url: `https://${service.productionHost}`,
+          probePath: service.probePath,
+          health: health.state,
+          healthDetail: health.detail,
+          statusCode: health.statusCode,
+          openIncidents: open.length,
+          latestIncidentId: open[0]?.id ?? null,
+          errorTracking: trackers.length ? trackers.join(' · ') : 'Sentinel logs',
+          trackersConnected: trackers.length > 0,
+        };
+      }));
+      return Response.json({ sites, checkedAt: new Date().toISOString() });
+    }
     if (url.pathname === '/api/watch') {
       if (request.method !== 'GET') return Response.json({ error: 'Method not allowed.' }, { status: 405 });
       return Response.json({ ...watch, now: new Date().toISOString() });
@@ -771,7 +942,7 @@ void (async () => {
       type: 'remediation_retry',
       message: 'This incident was waiting for a person. Starting a sandbox fix and pull request anyway.',
     });
-    await finishRemediation(incident, { store, actions } as Parameters<typeof finishRemediation>[1]);
+    await finishRemediation(incident, { store, actions } as unknown as Parameters<typeof finishRemediation>[1]);
   }
 })();
 

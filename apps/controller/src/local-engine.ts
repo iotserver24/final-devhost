@@ -266,7 +266,11 @@ export function startLocalEngine(options: LocalEngineOptions): LocalEngine {
       timing: {},
     };
     const fixAlreadyStarted = existing?.events.some(item => item.type === 'remediation_started' || item.type === 'draft_pr');
-    if (existing && (existing.status === 'recovered' || existing.status === 'pr_opened' || (existing.status === 'needs_human' && fixAlreadyStarted))) return;
+    const lastTouch = Date.parse(existing?.timing?.verifiedRecoveryAt ?? existing?.events.at(-1)?.at ?? existing?.detectedAt ?? '');
+    const freshFault = Boolean(existing && fault.faultInjectedAt && Date.parse(fault.faultInjectedAt) > lastTouch);
+    if (existing && freshFault && (existing.status === 'recovered' || existing.status === 'needs_human' || existing.status === 'remediation_failed')) {
+      existing.status = 'detected';
+    } else if (existing && (existing.status === 'recovered' || existing.status === 'pr_opened' || (existing.status === 'needs_human' && fixAlreadyStarted))) return;
 
     // Evidence: observations only from here; the diagnosis string is an inference and marked as one.
     const at = now().toISOString();

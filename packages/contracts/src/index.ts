@@ -132,6 +132,8 @@ export interface Incident {
   targetId?: string;
   /** Evidence sources contributing to this incident, for example `sentry`. */
   evidenceSources?: string[];
+  /** Demo diagnosis label. Absent when the controller has not classified the fault. */
+  cause?: 'code_regression' | 'bad_deploy' | 'failing_dependency';
 }
 
 export interface RemediationRequest {

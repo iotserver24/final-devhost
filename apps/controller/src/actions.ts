@@ -72,7 +72,7 @@ async function runRemediation(incident: Incident, config: RemediationConfig, hub
     incidentId: incident.id,
     repository: config.repository,
     commitSha: incident.commitSha,
-    evidence: incident.evidence,
+    evidence: incident.evidence.slice(-20).map(line => line.slice(0, 1000)),
     ...(incident.runtimeLogs ? { runtimeLogs: incident.runtimeLogs } : {}),
     setupCommand: config.setupCommand,
     reproduceCommand: config.reproduceCommand,

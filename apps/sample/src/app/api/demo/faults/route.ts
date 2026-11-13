@@ -15,7 +15,7 @@ import {
 
 export const dynamic = "force-dynamic";
 
-const MODES: FaultMode[] = ["healthy", "runtime", "persistent", "dependency", "ambiguous"];
+const MODES: FaultMode[] = ["healthy", "runtime", "persistent", "dependency", "config", "ambiguous"];
 
 // Read-only state endpoint: safe to expose without the control token.
 export function GET() {
