@@ -137,23 +137,31 @@ if (remediationFlag === 'true') {
   if (!process.env.GITHUB_READ_TOKEN && !githubAppReady) missing.push('GITHUB_READ_TOKEN or a connected GitHub app');
   if (!process.env.REMEDIATOR_REPOSITORY) missing.push('REMEDIATOR_REPOSITORY');
   if (missing.length) throw new Error(`Remediation requires configuration: ${missing.join(', ')}.`);
+  const pathPrefix = `${(process.env.REMEDIATOR_ALLOWED_PATH_PREFIX?.trim() || 'apps/sample/').replace(/\/?$/, '/')}`;
+  const standaloneSample = pathPrefix === 'src/';
+  const fixturePath = `${pathPrefix}tests/crash.repro.test.ts`;
+  const configuredFixture = process.env.REMEDIATOR_FIXTURE_PATH?.trim();
+  const fixturePattern = new RegExp(`^${pathPrefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}tests/[A-Za-z0-9._/-]+\\.test\\.ts$`);
+  const safeFixturePath = configuredFixture && fixturePattern.test(configuredFixture) ? configuredFixture : fixturePath;
   remediation = {
     repository: process.env.REMEDIATOR_REPOSITORY ?? '',
-    setupCommand: process.env.REMEDIATOR_SETUP_COMMAND ?? 'bun install --frozen-lockfile --filter ./apps/sample',
-    reproduceCommand: process.env.REMEDIATOR_REPRODUCE_COMMAND ?? 'bun test apps/sample/tests/filter.repro.test.ts',
-    testCommand: process.env.REMEDIATOR_TEST_COMMAND ?? 'bun run --cwd apps/sample test',
-    buildCommand: process.env.REMEDIATOR_BUILD_COMMAND ?? 'bun run --cwd apps/sample build',
+    setupCommand: process.env.REMEDIATOR_SETUP_COMMAND ?? (standaloneSample ? 'bun install --frozen-lockfile' : 'bun install --frozen-lockfile --filter ./apps/sample'),
+    reproduceCommand: `bun test ${safeFixturePath}`,
+    testCommand: process.env.REMEDIATOR_TEST_COMMAND ?? (standaloneSample ? 'bun test' : 'bun run --cwd apps/sample test'),
+    buildCommand: process.env.REMEDIATOR_BUILD_COMMAND ?? (standaloneSample ? 'bun run build' : 'bun run --cwd apps/sample build'),
     provider: {
       modelName: process.env.REMEDIATOR_MODEL_NAME ?? 'dedicated-remediator',
       modelId: process.env.REMEDIATOR_MODEL_ID!,
       baseUrl: process.env.REMEDIATOR_MODEL_BASE_URL!,
-      apiBackend: (process.env.REMEDIATOR_MODEL_API_BACKEND ?? 'responses') as RemediationConfig['provider']['apiBackend'],
+      apiBackend: (process.env.REMEDIATOR_MODEL_API_BACKEND ?? 'chat_completions') as RemediationConfig['provider']['apiBackend'],
       apiKey: process.env.REMEDIATOR_MODEL_API_KEY!,
       githubReadToken: process.env.GITHUB_READ_TOKEN ?? 'github-app',
     },
     reproductionFixture: {
-      path: process.env.REMEDIATOR_FIXTURE_PATH ?? 'apps/sample/tests/filter.repro.test.ts',
-      sourceFile: resolve(packageDirectory, '..', '..', process.env.REMEDIATOR_FIXTURE_SOURCE ?? 'packages/remediator/fixtures/task-filter.repro.ts.txt'),
+      path: safeFixturePath,
+      sourceFile: resolve(packageDirectory, '..', '..', standaloneSample || safeFixturePath.startsWith('src/')
+        ? 'packages/remediator/fixtures/task-crash.src.test.ts.txt'
+        : 'packages/remediator/fixtures/task-crash.sample.test.ts.txt'),
     },
   };
 }
