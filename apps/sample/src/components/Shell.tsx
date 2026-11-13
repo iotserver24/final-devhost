@@ -1,4 +1,7 @@
+"use client";
+
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 
 const links = [
   { href: "/", label: "Board" },
@@ -10,6 +13,9 @@ const links = [
 ];
 
 export function Shell({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
+  const pinned = process.env.NEXT_PUBLIC_SITE_SLUG;
+  if (pinned || pathname.startsWith("/sites/")) return <>{children}</>;
   return (
     <div className="shell">
       <header className="topbar">

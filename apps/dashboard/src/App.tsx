@@ -105,7 +105,15 @@ function IncidentCard({ incident, selected, onSelect, href }: { incident: Incide
       </span>}
       <span className="card-summary">{incidentHeadline(incident)}</span>
     </>;
-  if (href) return <Link className={className} href={href}>{body}</Link>;
+  if (href) return <Link className="incident-row" href={href}>
+    <StatusPill status={incident.status} />
+    <span className="incident-row-copy">
+      <strong>{kindLabels[incident.kind]}</strong>
+      <span>{incidentHeadline(incident)}</span>
+    </span>
+    <span className="incident-row-service">{incident.targetId || 'Unassigned'}</span>
+    <span className="incident-row-when">{formatDate(incident.detectedAt)}</span>
+  </Link>;
   return <button className={className} onClick={onSelect} type="button">{body}</button>;
 }
 
@@ -397,15 +405,15 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
   const targets = useMemo(() => [...new Set(snapshot.incidents.map(item => item.targetId).filter((value): value is string => Boolean(value)))], [snapshot.incidents]);
   const visible = useMemo(() => targetFilter === 'all' ? snapshot.incidents : snapshot.incidents.filter(item => item.targetId === targetFilter), [snapshot.incidents, targetFilter]);
   const counts = useMemo(() => ({ active: visible.filter(item => !['recovered', 'needs_human', 'remediation_failed', 'pr_opened'].includes(item.status)).length, recovered: visible.filter(item => item.status === 'recovered').length }), [visible]);
-  const section = pathname.startsWith('/setup') ? 'setup' : pathname.startsWith('/watch') ? 'watch' : pathname.startsWith('/sites') ? 'sites' : pathname.startsWith('/incidents/') ? 'incident' : 'incidents';
+  const section = pathname.startsWith('/setup') ? 'setup' : pathname.startsWith('/watch') ? 'watch' : pathname.startsWith('/incidents/') ? 'incident' : pathname.startsWith('/incidents') ? 'incidents' : 'fleet';
 
   return <div className="app-shell">
     <header className="topbar">
-      <div className="brand"><img className="brand-logo" src="/logo.png" alt="" /><span>Sentinel</span></div>
+      <Link className="brand" href="/"><img className="brand-logo" src="/logo.png" alt="" /><span>Sentinel</span></Link>
       <nav className="desk-nav" aria-label="Desk">
-        <Link className={section === 'incidents' || section === 'incident' ? 'active' : ''} href="/">Incidents</Link>
+        <Link className={section === 'fleet' ? 'active' : ''} href="/">Sites</Link>
+        <Link className={section === 'incidents' || section === 'incident' ? 'active' : ''} href="/incidents">Incidents</Link>
         <Link className={section === 'watch' ? 'active' : ''} href="/watch">Watch</Link>
-        <Link className={section === 'sites' ? 'active' : ''} href="/sites">Sites</Link>
         <Link className={section === 'setup' ? 'active' : ''} href="/setup">Setup</Link>
       </nav>
       <div className="topbar-meta">
@@ -417,47 +425,121 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
       </div>
     </header>
     {section === 'watch' && <><FailureStreak watch={watch} /><main className="detail"><Overview watch={watch} /></main></>}
-    {section === 'sites' && <Sites />}
+    {(section === 'fleet' || section === 'sites') && <Fleet incidents={snapshot.incidents} />}
     {section === 'setup' && <Setup onClose={() => undefined} />}
     {section === 'incident' && <main className="detail-wrap">{selected ? <Detail incident={selected} watch={watch} /> : <p className="state-message">{snapshot.loading ? 'Loading this incident…' : 'That incident was not found.'} <Link href="/">Back to incidents</Link></p>}</main>}
-    {section === 'incidents' && <div className="workspace workspace-single">
-      <aside className="sidebar sidebar-wide">
-        <div className="sidebar-heading"><div><p className="eyebrow">What broke</p><h2>Incidents</h2></div><span className="count">{visible.length}</span></div>
-        <div className="sidebar-stats"><span><strong>{counts.active}</strong> still open</span><span><strong>{counts.recovered}</strong> recovered</span></div>
+    {section === 'incidents' && <main className="desk">
+      <header className="desk-head">
+        <div>
+          <h1>Incidents</h1>
+          <p>{counts.active} open · {counts.recovered} recovered · {visible.length} shown</p>
+        </div>
         {targets.length > 1 && <label className="target-filter">Service
           <select value={targetFilter} onChange={event => setTargetFilter(event.target.value)}>
             <option value="all">All services</option>
             {targets.map(target => <option key={target} value={target}>{target}</option>)}
           </select>
         </label>}
-        {snapshot.loading && <p className="state-message">Loading incidents…</p>}
-        {snapshot.error && <div className="error-box" role="alert"><strong>Controller unavailable</strong><p>{snapshot.error}</p><button onClick={() => setRefresh(value => value + 1)} type="button">Try again</button></div>}
-        {!snapshot.loading && !snapshot.error && visible.length === 0 && <p className="state-message">Nothing is open. Watch stays on the Watch page.</p>}
-        <nav className="incident-list" aria-label="Incidents">{visible.map(incident => <IncidentCard key={incident.id} incident={incident} selected={false} onSelect={() => undefined} href={`/incidents/${incident.id}`} />)}</nav>
-      </aside>
-    </div>}
+      </header>
+      {snapshot.loading && <p className="state-message">Loading incidents…</p>}
+      {snapshot.error && <div className="error-box" role="alert"><strong>Controller unavailable</strong><p>{snapshot.error}</p><button onClick={() => setRefresh(value => value + 1)} type="button">Try again</button></div>}
+      {!snapshot.loading && !snapshot.error && visible.length === 0 && <p className="desk-empty">Nothing is open. The probe keeps running on Watch.</p>}
+      <nav className="incident-board" aria-label="Incidents">
+        {visible.length > 0 && <div className="incident-row incident-row-head" aria-hidden="true"><span>State</span><span>What happened</span><span>Service</span><span>Detected</span></div>}
+        {visible.map(incident => <IncidentCard key={incident.id} incident={incident} selected={false} onSelect={() => undefined} href={`/incidents/${incident.id}`} />)}
+      </nav>
+    </main>}
   </div>;
 }
 
 const watchedSites = [
-  { name: 'Ledger', fault: 'Bad deploy', action: 'Restore the known-good revision', href: 'https://final-devhost.vercel.app/sites/ledger' },
-  { name: 'Switchboard', fault: 'Broken config', action: 'Restore BILLING_MODE to invoice', href: 'https://final-devhost.vercel.app/sites/switchboard' },
-  { name: 'Hopper', fault: 'Out of memory', action: 'Restart the task API once', href: 'https://final-devhost.vercel.app/sites/hopper' },
-  { name: 'Relay', fault: 'Dependency down', action: 'Restart the dependency, leave the app', href: 'https://final-devhost.vercel.app/sites/relay' },
+  { name: 'Ledger', fault: 'Bad deploy', action: 'Restore the known-good revision', href: 'https://fieldnote-ledger.vercel.app' },
+  { name: 'Switchboard', fault: 'Broken config', action: 'Restore BILLING_MODE to invoice', href: 'https://fieldnote-switchboard.vercel.app' },
+  { name: 'Hopper', fault: 'Out of memory', action: 'Restart the task API once', href: 'https://fieldnote-hopper.vercel.app' },
+  { name: 'Relay', fault: 'Dependency down', action: 'Restart the dependency, leave the app', href: 'https://fieldnote-relay.vercel.app' },
 ];
 
-function Sites() {
+type FleetSite = {
+  id: string;
+  name: string;
+  role: string;
+  host: string;
+  url: string;
+  probePath: string;
+  health: 'up' | 'down' | 'unknown';
+  healthDetail: string;
+  statusCode: number | null;
+  openIncidents: number;
+  latestIncidentId: string | null;
+  errorTracking: string;
+  trackersConnected: boolean;
+};
+
+function Fleet({ incidents }: { incidents: Incident[] }) {
+  const [sites, setSites] = useState<FleetSite[] | null>(null);
+  const [error, setError] = useState('');
+  useEffect(() => {
+    if (mode === 'fixtures') return;
+    const abort = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    async function poll() {
+      try {
+        const response = await fetch('/api/fleet', { headers: { Accept: 'application/json' }, cache: 'no-store', signal: abort.signal });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const body = await response.json() as { sites?: FleetSite[] };
+        setSites(body.sites ?? []);
+        setError('');
+      } catch (cause) {
+        if (!abort.signal.aborted) setError(cause instanceof Error ? cause.message : 'Fleet check failed.');
+      }
+      if (!abort.signal.aborted) timer = setTimeout(poll, 8000);
+    }
+    void poll();
+    return () => { abort.abort(); clearTimeout(timer); };
+  }, []);
+  const shown = sites ?? watchedSites.map(site => ({
+    id: site.name,
+    name: site.name,
+    role: site.name === 'Relay' ? 'dependency' : 'app',
+    host: site.href.replace('https://', ''),
+    url: site.href,
+    probePath: '/api/tasks',
+    health: 'unknown' as const,
+    healthDetail: 'Waiting for the controller.',
+    statusCode: null,
+    openIncidents: incidents.filter(item => item.targetId?.includes(site.name.toLowerCase()) || item.deploymentUrl?.includes(site.href.replace('https://', ''))).length,
+    latestIncidentId: null,
+    errorTracking: 'Sentinel logs',
+    trackersConnected: false,
+  }));
+  const down = shown.filter(site => site.health === 'down').length;
+  const open = shown.reduce((sum, site) => sum + site.openIncidents, 0);
   return <main className="sites-page">
-    <p className="eyebrow">Fieldnote on Vercel</p>
-    <h1>Four sites, four faults</h1>
-    <p className="muted">Repository iotserver24/taskflow-sample. Host final-devhost.vercel.app. Each page turns red only while its own fault is active.</p>
-    <ul className="site-grid">
-      {watchedSites.map(site => <li key={site.name}>
-        <a href={site.href} target="_blank" rel="noreferrer">
-          <span>{site.fault}</span>
-          <strong>{site.name}</strong>
-          <p>{site.action}</p>
-        </a>
+    <header className="desk-head">
+      <div>
+        <h1>{shown.length} connected sites</h1>
+        <p>{down === 0 ? 'Every site answered the health check.' : `${down} site${down === 1 ? '' : 's'} failing the health check.`} {open} open incident{open === 1 ? '' : 's'} across the fleet.</p>
+      </div>
+      <Link className="button" href="/incidents">Incident list</Link>
+    </header>
+    {error && <p className="desk-empty" role="status">Live checks paused ({error}). The site list below stays visible.</p>}
+    <ul className="site-grid fleet-grid">
+      {shown.map(site => <li key={site.id}>
+        <article className={`fleet-card fleet-${site.health}`}>
+          <div className="fleet-card-top">
+            <strong>{site.name}</strong>
+            <span className={`health-pill health-${site.health}`}>{site.health === 'up' ? 'Healthy' : site.health === 'down' ? 'Errors' : 'Checking'}</span>
+          </div>
+          <p className="fleet-role">{site.role === 'dependency' ? 'Dependency' : 'Application'} · {site.host}</p>
+          <dl>
+            <div><dt>Health</dt><dd>{site.healthDetail}</dd></div>
+            <div><dt>Error tracking</dt><dd>{site.openIncidents} open · {site.errorTracking}{site.trackersConnected ? '' : ' · Sentry and PostHog not connected'}</dd></div>
+          </dl>
+          <div className="fleet-actions">
+            <a href={site.url} target="_blank" rel="noreferrer">Open site</a>
+            {site.latestIncidentId && <Link href={`/incidents/${site.latestIncidentId}`}>Latest incident</Link>}
+          </div>
+        </article>
       </li>)}
     </ul>
   </main>;

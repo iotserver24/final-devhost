@@ -26,6 +26,8 @@ export function Setup({ onClose }: { onClose: () => void }) {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [vercel, setVercel] = useState<VercelConnect>(null);
+  const [renderLogin, setRenderLogin] = useState<VercelConnect>(null);
+  const [renderOwners, setRenderOwners] = useState<{ id: string; name: string }[]>([]);
   const [repos, setRepos] = useState<string[]>([]);
   const [repoQuery, setRepoQuery] = useState('');
   const [projects, setProjects] = useState<{ id: string; name: string; domains: string[]; teamId?: string }[]>([]);
@@ -164,6 +166,31 @@ export function Setup({ onClose }: { onClose: () => void }) {
     }
   }
 
+  async function connectRender() {
+    setError('');
+    try {
+      const started = await fetch('/api/render/connect', { method: 'POST', headers: { Accept: 'application/json' } });
+      if (!started.ok) throw new Error('Render sign-in did not start.');
+      const body = await started.json() as { userCode: string; verificationUri: string; intervalMs: number };
+      setRenderLogin({ userCode: body.userCode, verificationUri: body.verificationUri, status: 'Waiting for approval in the Render dashboard.' });
+      window.open(body.verificationUri, '_blank', 'noopener');
+      const timer = window.setInterval(async () => {
+        const poll = await fetch('/api/render/connect', { headers: { Accept: 'application/json' } });
+        if (poll.status === 404) { window.clearInterval(timer); setError('Render sign-in expired. Start it again.'); return; }
+        if (!poll.ok) return;
+        const result = await poll.json() as { ok?: boolean; owners?: { id: string; name: string }[] };
+        if (result.ok) {
+          window.clearInterval(timer);
+          setRenderOwners(result.owners ?? []);
+          setRenderLogin(current => current ? { ...current, status: result.owners?.length === 1 ? 'Connected. Workspace saved.' : 'Connected. Choose the workspace.' } : current);
+          await loadSettings();
+        }
+      }, Math.max(body.intervalMs, 5000));
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Render sign-in did not start.');
+    }
+  }
+
   async function choose(key: string, value: string, extra?: Record<string, string>) {
     setValue(key, value);
     const response = await fetch('/api/settings', {
@@ -175,7 +202,7 @@ export function Setup({ onClose }: { onClose: () => void }) {
     else await loadSettings();
   }
 
-  async function disconnect(provider: 'github' | 'vercel') {
+  async function disconnect(provider: 'github' | 'vercel' | 'render') {
     setError('');
     const response = await fetch('/api/disconnect', {
       method: 'POST',
@@ -186,6 +213,7 @@ export function Setup({ onClose }: { onClose: () => void }) {
     if (!response.ok) { setError(body.error || 'Disconnect did not finish.'); return; }
     if (provider === 'github') { setRepos([]); setGithubListNote('GitHub access was disconnected.'); }
     if (provider === 'vercel') { setProjects([]); setVercel(null); setVercelListNote('Vercel was disconnected.'); setMonitorNote('Monitor stopped.'); }
+    if (provider === 'render') { setRenderLogin(null); setRenderOwners([]); }
     setDraft(current => ({ ...current, ...(provider === 'github' ? { REMEDIATOR_REPOSITORY: '' } : { VERCEL_PROJECT_ID: '' }) }));
     await loadSettings();
   }
@@ -245,7 +273,21 @@ export function Setup({ onClose }: { onClose: () => void }) {
       <button type="button" onClick={() => void fetch('/api/watched-services', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(serviceDraft) }).then(() => loadServices())}>Add service</button>
     </section>
 
-    <p className="setup-note">Railway, Render, and Coolify use scoped API tokens below. Select the active platform, provide its public production URL and service/application ID, then restart Sentinel. Deployment logs are attached to incident evidence and rollback remains opt-in.</p>
+    <section className="setup-hero" aria-labelledby="render-title">
+      <div className="setup-hero-copy">
+        <div>
+          <h2 id="render-title">Render</h2>
+          <p>Same device login as the Render CLI. The token is what logs and rollback already send as a bearer.</p>
+          {renderLogin && <p className="connect-status"><strong>{renderLogin.status}</strong> Code <code>{renderLogin.userCode}</code> · <a href={renderLogin.verificationUri} target="_blank" rel="noreferrer">open Render</a></p>}
+          {renderOwners.length > 1 && <ul>{renderOwners.map(owner => <li key={owner.id}><button type="button" onClick={() => void choose('RENDER_OWNER_ID', owner.id)}>{owner.name}</button></li>)}</ul>}
+        </div>
+      </div>
+      <div className="setup-hero-actions">
+        <button className="button button-primary" type="button" onClick={() => void connectRender()}>Connect Render</button>
+        <button className="button button-ghost" type="button" onClick={() => void disconnect('render')}>Disconnect</button>
+      </div>
+    </section>
+    <p className="setup-note">Railway and Coolify still take a pasted token below. Render can use Connect Render instead. Set the public production URL and service id, then restart Sentinel. Logs attach to the incident. Rollback stays off until you turn it on.</p>
 
     {error && <div className="error-box" role="alert"><strong>Setup needs attention</strong><p>{error}</p></div>}
 

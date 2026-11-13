@@ -20,6 +20,7 @@ import { posthogFromEnvironment } from './posthog';
 import { sentryFromEnvironment } from './sentry';
 import { disconnectFields, exchangeGithubManifest, githubConnectTarget, githubCredentials, githubStateOk, installationExists, listInstallationRepositories, matchingVercelProject, verifyGithubWebhook } from './github-app';
 import { pollVercelDevice, startVercelDevice } from './vercel-login';
+import { listRenderOwners, pollRenderDevice, startRenderDevice } from './render-login';
 import { DashboardAuth } from './auth';
 import { AuditLog, RateLimiter, requiredRole, roleAllows } from './access';
 import { DeliveryLedger, RunLock, readCommentWebhook, chooseStrategy, buildFollowupContext } from './pr-followup';
@@ -220,6 +221,7 @@ const watch = {
 };
 
 let vercelDevice: { code: string; expiresAt: number } | undefined;
+let renderDevice: { code: string; expiresAt: number } | undefined;
 let monitorWorker: PollingWorker | undefined;
 let logsTimer: ReturnType<typeof setInterval> | undefined;
 let deploymentWatchTimer: ReturnType<typeof setInterval> | undefined;
@@ -504,6 +506,26 @@ async function stopMonitor(): Promise<void> {
   localEngine = undefined;
 }
 
+async function probeWatchedSite(host: string, probePath: string): Promise<{ state: 'up' | 'down' | 'unknown'; detail: string; statusCode: number | null }> {
+  const paths = [...new Set(['/api/health', probePath].filter(path => path.startsWith('/')))];
+  const results: string[] = [];
+  let statusCode: number | null = null;
+  let down = false;
+  for (const path of paths) {
+    try {
+      const response = await fetch(`https://${host}${path}`, { signal: AbortSignal.timeout(5000), redirect: 'manual', headers: { Accept: 'application/json' } });
+      statusCode = response.status;
+      if (response.status >= 200 && response.status < 300) results.push(`${path} ${response.status}`);
+      else { down = true; results.push(`${path} ${response.status}`); }
+    } catch {
+      down = true;
+      results.push(`${path} unreachable`);
+    }
+  }
+  if (results.length === 0) return { state: 'unknown', detail: 'No probe path.', statusCode: null };
+  return { state: down ? 'down' : 'up', detail: results.join(' · '), statusCode };
+}
+
 // --- Local demo monitor (BE2): watches BE1's TaskFlow services and acts through the broker. ---
 let localEngine: LocalEngine | undefined;
 
@@ -688,7 +710,7 @@ async function integrationRoutes(request: Request, settingsStore: typeof store):
     let body: unknown;
     try { body = await request.json(); } catch { return Response.json({ error: 'Expected JSON.' }, { status: 400 }); }
     const provider = body && typeof body === 'object' && 'provider' in body ? (body as { provider?: unknown }).provider : undefined;
-    if (provider !== 'github' && provider !== 'vercel') return Response.json({ error: 'Choose github or vercel to disconnect.' }, { status: 400 });
+    if (provider !== 'github' && provider !== 'vercel' && provider !== 'render') return Response.json({ error: 'Choose github, vercel, or render to disconnect.' }, { status: 400 });
     const keys = [...disconnectFields[provider]];
     await settingsStore.deleteSettings(keys);
     for (const key of keys) delete process.env[key];
@@ -737,6 +759,36 @@ async function integrationRoutes(request: Request, settingsStore: typeof store):
       return Response.json({ ok: true, restartRequired: true });
     } catch {
       return Response.json({ error: 'Vercel sign-in did not finish.' }, { status: 502 });
+    }
+  }
+  if (url.pathname === '/api/render/connect' && request.method === 'POST') {
+    try {
+      const device = await startRenderDevice();
+      renderDevice = { code: device.deviceCode, expiresAt: device.expiresAt };
+      return Response.json({ userCode: device.userCode, verificationUri: device.verificationUri, intervalMs: device.intervalMs });
+    } catch {
+      return Response.json({ error: 'Render sign-in did not start.' }, { status: 502 });
+    }
+  }
+  if (url.pathname === '/api/render/connect' && request.method === 'GET') {
+    if (!renderDevice || renderDevice.expiresAt < Date.now()) return Response.json({ error: 'Start Render sign-in again.' }, { status: 404 });
+    try {
+      const result = await pollRenderDevice(renderDevice.code);
+      if (result.pending) return Response.json({ pending: true });
+      if (!result.accessToken) return Response.json({ error: 'Render sign-in did not finish.' }, { status: 502 });
+      const owners = await listRenderOwners(result.accessToken);
+      await settingsStore.writeSettings({
+        RENDER_API_KEY: result.accessToken,
+        ...(result.refreshToken ? { RENDER_REFRESH_TOKEN: result.refreshToken } : {}),
+        ...(owners.length === 1 ? { RENDER_OWNER_ID: owners[0].id } : {}),
+      });
+      process.env.RENDER_API_KEY = result.accessToken;
+      if (result.refreshToken) process.env.RENDER_REFRESH_TOKEN = result.refreshToken;
+      if (owners.length === 1) process.env.RENDER_OWNER_ID = owners[0].id;
+      renderDevice = undefined;
+      return Response.json({ ok: true, owners, restartRequired: true });
+    } catch {
+      return Response.json({ error: 'Render sign-in did not finish.' }, { status: 502 });
     }
   }
   return null;
@@ -793,6 +845,32 @@ const server = Bun.serve({
       if ('error' in parsed) return Response.json({ error: parsed.error }, { status: 400 });
       await store.saveWatchedService(parsed);
       return Response.json({ ok: true, service: parsed });
+    }
+    if (url.pathname === '/api/fleet' && request.method === 'GET') {
+      const services = (await store.listWatchedServices()).filter(service => service.enabled);
+      const incidents = await store.list();
+      const sites = await Promise.all(services.map(async service => {
+        const health = await probeWatchedSite(service.productionHost, service.probePath);
+        const related = incidents.filter(incident => incident.targetId === service.id || incident.projectId === service.vercelProjectId);
+        const open = related.filter(incident => incident.status !== 'recovered');
+        const trackers = [service.sentryProject ? `Sentry ${service.sentryProject}` : '', service.posthogProject ? `PostHog ${service.posthogProject}` : ''].filter(Boolean);
+        return {
+          id: service.id,
+          name: service.name,
+          role: service.role,
+          host: service.productionHost,
+          url: `https://${service.productionHost}`,
+          probePath: service.probePath,
+          health: health.state,
+          healthDetail: health.detail,
+          statusCode: health.statusCode,
+          openIncidents: open.length,
+          latestIncidentId: open[0]?.id ?? null,
+          errorTracking: trackers.length ? trackers.join(' · ') : 'Sentinel logs',
+          trackersConnected: trackers.length > 0,
+        };
+      }));
+      return Response.json({ sites, checkedAt: new Date().toISOString() });
     }
     if (url.pathname === '/api/watch') {
       if (request.method !== 'GET') return Response.json({ error: 'Method not allowed.' }, { status: 405 });
