@@ -397,7 +397,7 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
   const targets = useMemo(() => [...new Set(snapshot.incidents.map(item => item.targetId).filter((value): value is string => Boolean(value)))], [snapshot.incidents]);
   const visible = useMemo(() => targetFilter === 'all' ? snapshot.incidents : snapshot.incidents.filter(item => item.targetId === targetFilter), [snapshot.incidents, targetFilter]);
   const counts = useMemo(() => ({ active: visible.filter(item => !['recovered', 'needs_human', 'remediation_failed', 'pr_opened'].includes(item.status)).length, recovered: visible.filter(item => item.status === 'recovered').length }), [visible]);
-  const section = pathname.startsWith('/setup') ? 'setup' : pathname.startsWith('/watch') ? 'watch' : pathname.startsWith('/incidents/') ? 'incident' : 'incidents';
+  const section = pathname.startsWith('/setup') ? 'setup' : pathname.startsWith('/watch') ? 'watch' : pathname.startsWith('/sites') ? 'sites' : pathname.startsWith('/incidents/') ? 'incident' : 'incidents';
 
   return <div className="app-shell">
     <header className="topbar">
@@ -405,6 +405,7 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
       <nav className="desk-nav" aria-label="Desk">
         <Link className={section === 'incidents' || section === 'incident' ? 'active' : ''} href="/">Incidents</Link>
         <Link className={section === 'watch' ? 'active' : ''} href="/watch">Watch</Link>
+        <Link className={section === 'sites' ? 'active' : ''} href="/sites">Sites</Link>
         <Link className={section === 'setup' ? 'active' : ''} href="/setup">Setup</Link>
       </nav>
       <div className="topbar-meta">
@@ -416,6 +417,7 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
       </div>
     </header>
     {section === 'watch' && <><FailureStreak watch={watch} /><main className="detail"><Overview watch={watch} /></main></>}
+    {section === 'sites' && <Sites />}
     {section === 'setup' && <Setup onClose={() => undefined} />}
     {section === 'incident' && <main className="detail-wrap">{selected ? <Detail incident={selected} watch={watch} /> : <p className="state-message">{snapshot.loading ? 'Loading this incident…' : 'That incident was not found.'} <Link href="/">Back to incidents</Link></p>}</main>}
     {section === 'incidents' && <div className="workspace workspace-single">
@@ -435,6 +437,30 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
       </aside>
     </div>}
   </div>;
+}
+
+const watchedSites = [
+  { name: 'Ledger', fault: 'Bad deploy', action: 'Restore the known-good revision', href: 'https://final-devhost.vercel.app/sites/ledger' },
+  { name: 'Switchboard', fault: 'Broken config', action: 'Restore BILLING_MODE to invoice', href: 'https://final-devhost.vercel.app/sites/switchboard' },
+  { name: 'Hopper', fault: 'Out of memory', action: 'Restart the task API once', href: 'https://final-devhost.vercel.app/sites/hopper' },
+  { name: 'Relay', fault: 'Dependency down', action: 'Restart the dependency, leave the app', href: 'https://final-devhost.vercel.app/sites/relay' },
+];
+
+function Sites() {
+  return <main className="sites-page">
+    <p className="eyebrow">Fieldnote on Vercel</p>
+    <h1>Four sites, four faults</h1>
+    <p className="muted">Repository iotserver24/taskflow-sample. Host final-devhost.vercel.app. Each page turns red only while its own fault is active.</p>
+    <ul className="site-grid">
+      {watchedSites.map(site => <li key={site.name}>
+        <a href={site.href} target="_blank" rel="noreferrer">
+          <span>{site.fault}</span>
+          <strong>{site.name}</strong>
+          <p>{site.action}</p>
+        </a>
+      </li>)}
+    </ul>
+  </main>;
 }
 
 function Login({ onAuthenticated }: { onAuthenticated: () => void }) {
